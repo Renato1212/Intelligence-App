@@ -429,6 +429,18 @@ export function domainFromLabel(label: string | null | undefined): DomainId | nu
   return null;
 }
 
+/** Match a free-text category label ("Candlesticks", "MOC", "presser"…) to a category id of a domain. */
+export function categoryFromLabel(domainId: DomainId, label: string | null | undefined): string | null {
+  if (!label) return null;
+  const s = label.trim().toLowerCase();
+  if (!s) return null;
+  const d = DOMAIN_MAP[domainId];
+  for (const c of d.categories) {
+    if (s === c.id || s === c.label.toLowerCase()) return c.id;
+  }
+  return null;
+}
+
 export function categoryLabel(domainId: string | null | undefined, catId: string | null | undefined): string {
   const d = domainOf(domainId);
   if (!d || !catId) return catId ?? '';

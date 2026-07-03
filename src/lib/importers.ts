@@ -1,5 +1,5 @@
 import type { Side, Trade, TradeSource } from '../domain/types';
-import { domainFromLabel } from '../domain/taxonomy';
+import { categoryFromLabel, domainFromLabel } from '../domain/taxonomy';
 import { headerKey, parseCSV, toISODateTime, toNumber } from './csv';
 import { pointValue, symbolRoot } from './contracts';
 
@@ -28,9 +28,9 @@ function findCol(headers: string[], aliases: string[]): number {
 }
 
 const COLS = {
-  symbol: ['symbol', 'instrument', 'contract', 'market', 'ticker', 'security', 'inst'],
+  symbol: ['symbol', 'instrument', 'contract', 'market', 'ticker', 'security', 'inst', 'product', 'product code'],
   /** Trade date when the export splits date and times into separate columns (Trader One style) */
-  date: ['date', 'trade date', 'day'],
+  date: ['date', 'trade date', 'trade day', 'trading day', 'day'],
   entryTime: ['entry date', 'entry time', 'entry date/time', 'open time', 'opened', 'entrydt', 'date/time', 'open', 'entry'],
   exitTime: ['exit date', 'exit time', 'exit date/time', 'close time', 'closed', 'exitdt', 'close', 'exit'],
   entryPrice: ['entry price', 'open price', 'avg entry price', 'price in', 'buy price', 'entry'],
@@ -164,11 +164,41 @@ function parseTradeLog(
     t.domain = domainFromLabel(get(ci.domainTag));
     t.category = (get(ci.category) ?? '').trim().toLowerCase() || null;
     const rawTags = (get(ci.tags) ?? '').trim();
-    if (rawTags) t.tags = rawTags.split(/[;,·|]/).map((x) => x.trim()).filter(Boolean);
-    t.description = (get(ci.description) ?? '').trim();
-    t.learned = (get(ci.learned) ?? '').trim();
-    t.applyNext = (get(ci.applyNext) ?? '').trim();
-    t.videoUrl = (get(ci.video) ?? '').trim();
+    if (rawTags) {
+      // "×" is the remove-button glyph next to each tag chip in Trader One's
+      // UI — it doubles as the separator when the cell text is captured
+      t.tags = rawTags
+        .split(/[;,·|×]/)
+        .map((x) => x.trim())
+        .filter((x) => x && !/^(\+|add( tag)?|\+ add)$/i.test(x));
+    }
+    // Trader One tags a trade as one chain: Domain × Category × ... × free text.
+    // Fold the leading entries into the taxonomy when they match.
+    if (!t.domain && t.tags.length) {
+      const inferred = domainFromLabel(t.tags[0]);
+      if (inferred) {
+        t.domain = inferred;
+        t.tags = t.tags.slice(1);
+        if (t.tags.length) {
+          const cat = categoryFromLabel(inferred, t.tags[0]);
+          if (cat) {
+            t.category = cat;
+            t.tags = t.tags.slice(1);
+          }
+        }
+        t.tags = t.tags.filter((x) => x.toLowerCase() !== 'other');
+      }
+    }
+    const cleanText = (v: string | undefined): string => {
+      const s = (v ?? '').replace(/×/g, ' ').replace(/\s+/g, ' ').trim();
+      // placeholder button text captured from empty journal cells
+      if (/^(description|notes?|add (a )?(description|note)|learned|video)$/i.test(s)) return '';
+      return s;
+    };
+    t.description = cleanText(get(ci.description));
+    t.learned = cleanText(get(ci.learned));
+    t.applyNext = cleanText(get(ci.applyNext));
+    t.videoUrl = cleanText(get(ci.video));
     t.importKey = makeImportKey(t);
     trades.push(t);
     sourceRows.push(rowIdx);

@@ -65,8 +65,8 @@ export function toISODateTime(raw: string | undefined): string | null {
   const s = raw.trim().replace(/\s+/g, ' ');
   if (!s) return null;
 
-  // ISO already
-  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/);
+  // ISO already (also tolerate "2026-07-02 - 17:24:07" style separators)
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ]|\s+-\s+)(\d{2}):(\d{2})(?::(\d{2}))?/);
   if (m) return `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6] ?? '00'}`;
 
   // YYYY-MM-DD or YYYYMMDD date only
@@ -75,8 +75,9 @@ export function toISODateTime(raw: string | undefined): string | null {
   m = s.match(/^(\d{4})(\d{2})(\d{2})$/);
   if (m) return `${m[1]}-${m[2]}-${m[3]}T00:00:00`;
 
-  // DD/MM/YYYY or MM/DD/YYYY (with optional time and AM/PM)
-  m = s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})(?: (\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?\s*(AM|PM|am|pm)?)?$/);
+  // DD/MM/YYYY or MM/DD/YYYY, with optional time and AM/PM; the date/time
+  // separator may be a space, " - " (Trader One) or a comma
+  m = s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})(?:\s*(?:-|,)?\s*(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?\s*(AM|PM|am|pm)?)?$/);
   if (m) {
     let [, a, b, yr, hh, mm, ss, ampm] = m;
     let year = Number(yr.length === 2 ? `20${yr}` : yr);
