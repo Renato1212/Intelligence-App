@@ -4,7 +4,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { MediaEditor } from '../components/media';
 import { DomainChip, PnL, SideBadge, useToast } from '../components/ui';
 import { CRITERIA, DOMAINS, domainOf, GRADE_LEVELS } from '../domain/taxonomy';
-import type { CriterionId, GradeLevel, Trade } from '../domain/types';
+import type { CriterionId, Execution, GradeLevel, Trade } from '../domain/types';
 import { db } from '../lib/db';
 import { downloadFile, openPrintView, tradeDebriefHtml, tradeDebriefMarkdown } from '../lib/exporters';
 import { fmtDate, fmtDuration, fmtMoney, fmtR, fmtTime } from '../lib/format';
@@ -274,6 +274,8 @@ export default function TradeDetail() {
           </div>
         </div>
 
+        {(draft.executions?.length ?? 0) > 0 && <ExecutionLadder trade={draft} />}
+
         <div className="card">
           <div className="card-title">
             Coach grading{' '}
@@ -332,5 +334,111 @@ export default function TradeDetail() {
         </div>
       </div>
     </>
+  );
+}
+
+const ORDER_TYPE_LABEL: Record<string, string> = {
+  market: 'Market',
+  limit: 'Limit',
+  stop: 'Stop',
+  'stop-limit': 'Stop-limit',
+  unknown: '—',
+};
+
+/**
+ * Every fill of the trade with its role in the position (entry, scale-in,
+ * scale-out, exit), the running position size and the evolving average
+ * price of the open position — the raw material for studying in-trade
+ * decisions when scaling dynamically.
+ */
+function ExecutionLadder({ trade }: { trade: Trade }) {
+  const execs = [...(trade.executions ?? [])].sort((a, b) => a.time.localeCompare(b.time));
+  const dir = trade.side === 'LONG' ? 1 : -1;
+
+  let position = 0; // signed contracts (+ long / − short)
+  let avgPrice = 0; // average price of the open position
+  const rows = execs.map((e, i) => {
+    const delta = (e.action === 'BUY' ? 1 : -1) * e.qty;
+    const before = position;
+    const increasing = Math.sign(delta) === dir || before === 0;
+    if (increasing) {
+      // adding in the trade direction — average price blends
+      avgPrice = (Math.abs(before) * avgPrice + e.qty * e.price) / (Math.abs(before) + e.qty);
+    }
+    position += delta;
+    const kind =
+      increasing && before === 0
+        ? 'Entry'
+        : increasing
+          ? 'Scale-in'
+          : position === 0 && i === execs.length - 1
+            ? 'Exit'
+            : position === 0
+              ? 'Exit'
+              : 'Scale-out';
+    return { e, kind, position, avgPrice };
+  });
+
+  const maxSize = Math.max(...rows.map((r) => Math.abs(r.position)), 0);
+  const entries = execs.filter((e) => (e.action === 'BUY' ? 1 : -1) === dir);
+  const exits = execs.filter((e) => (e.action === 'BUY' ? 1 : -1) !== dir);
+  const wavg = (xs: Execution[]) => {
+    const q = xs.reduce((s, x) => s + x.qty, 0);
+    return q ? xs.reduce((s, x) => s + x.price * x.qty, 0) / q : 0;
+  };
+  const fmtPx = (v: number) => Number(v.toFixed(6)).toString();
+
+  return (
+    <div className="card">
+      <div className="card-title">
+        Executions — how the position was built{' '}
+        <span className="hint">
+          {execs.length} fills · max size {maxSize} · avg in {fmtPx(wavg(entries))} · avg out {fmtPx(wavg(exits))}
+        </span>
+      </div>
+      <div className="table-wrap">
+        <table className="data">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Role</th>
+              <th>Action</th>
+              <th>Order type</th>
+              <th className="num">Qty</th>
+              <th className="num">Price</th>
+              <th className="num">Position after</th>
+              <th className="num">Avg price</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={i}>
+                <td className="mono">{fmtTime(r.e.time)}</td>
+                <td>
+                  <span
+                    className="chip"
+                    style={
+                      r.kind === 'Entry' || r.kind === 'Scale-in'
+                        ? { color: 'var(--gold-strong)', borderColor: 'var(--gold)' }
+                        : undefined
+                    }
+                  >
+                    {r.kind}
+                  </span>
+                </td>
+                <td>
+                  <span className={`side-badge ${r.e.action === 'BUY' ? 'long' : 'short'}`}>{r.e.action}</span>
+                </td>
+                <td className="muted">{ORDER_TYPE_LABEL[r.e.orderType] ?? r.e.orderType}</td>
+                <td className="num">{r.e.qty}</td>
+                <td className="num mono">{fmtPx(r.e.price)}</td>
+                <td className="num">{Math.abs(r.position)}</td>
+                <td className="num mono">{Math.abs(r.position) > 0 ? fmtPx(r.avgPrice) : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }

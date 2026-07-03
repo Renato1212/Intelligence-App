@@ -49,11 +49,65 @@ const COLS = {
   applyNext: ['apply', 'how to apply', 'application'],
   video: ['video', 'video url', 'recording'],
   // fill-mode columns
-  fillTime: ['update time', 'fill time', 'time', 'timestamp', 'transact time', 'date/time', 'created time', 'time of update'],
+  fillTime: ['update time', 'fill time', 'filled at', 'executed at', 'time', 'timestamp', 'transact time', 'date/time', 'created time', 'created', 'time of update'],
   fillPrice: ['avg fill price', 'fill price', 'price', 'avg price', 'trade price'],
   fillQty: ['filled qty', 'qty filled', 'fill qty', 'quantity', 'qty', 'exec qty', 'filled'],
   status: ['status', 'order status'],
+  orderType: ['type', 'order type', 'ordertype', 'ord type'],
 };
+
+export function normalizeOrderType(raw: string | undefined | null): import('../domain/types').OrderType {
+  const s = (raw ?? '').trim().toLowerCase();
+  if (!s) return 'unknown';
+  if (s.includes('stop') && s.includes('limit')) return 'stop-limit';
+  if (s.includes('stop') || s === 'stp') return 'stop';
+  if (s.includes('limit') || s === 'lmt') return 'limit';
+  if (s.includes('market') || s === 'mkt') return 'market';
+  return 'unknown';
+}
+
+/**
+ * Read an order-history / fills table into individual executions (used to
+ * attach scale-in/out detail to round-trip trades). Returns [] when the
+ * table doesn't look like executions.
+ */
+export function extractExecutionsFromTable(
+  headers: string[],
+  rows: string[][],
+): { instrument: string; exec: import('../domain/types').Execution }[] {
+  const ci = {
+    symbol: findCol(headers, COLS.symbol),
+    side: findCol(headers, COLS.side),
+    time: findCol(headers, COLS.fillTime),
+    price: findCol(headers, COLS.fillPrice),
+    qty: findCol(headers, COLS.fillQty),
+    status: findCol(headers, COLS.status),
+    orderType: findCol(headers, COLS.orderType),
+  };
+  if (ci.symbol < 0 || ci.side < 0 || ci.time < 0 || ci.price < 0 || ci.qty < 0) return [];
+  // a table with exit or pnl columns is a trade log, not executions
+  if (findCol(headers, COLS.exitPrice) >= 0 || findCol(headers, COLS.pnl) >= 0) return [];
+
+  const out: { instrument: string; exec: import('../domain/types').Execution }[] = [];
+  for (const row of rows) {
+    const get = (i: number) => (i >= 0 ? row[i] : undefined);
+    const symbol = (get(ci.symbol) ?? '').trim();
+    if (!symbol || symbol.length > 20) continue;
+    const status = (get(ci.status) ?? '').toLowerCase();
+    if (ci.status >= 0 && status && !/fill|complete|done|executed/.test(status)) continue;
+    const time = toISODateTime(get(ci.time));
+    const price = toNumber(get(ci.price));
+    const qty = Math.abs(toNumber(get(ci.qty)) ?? 0);
+    if (!time || price == null || !qty) continue;
+    const sideRaw = (get(ci.side) ?? '').trim().toLowerCase();
+    const action: 'BUY' | 'SELL' = sideRaw.startsWith('b') || sideRaw === 'long' ? 'BUY' : 'SELL';
+    out.push({
+      instrument: symbolRoot(symbol),
+      exec: { time, action, qty, price, orderType: normalizeOrderType(get(ci.orderType)) },
+    });
+  }
+  return out;
+}
 
 function normalizeSide(raw: string | undefined, pnlHint?: { entry: number; exit: number; pnl: number | null }): Side {
   const s = (raw ?? '').trim().toLowerCase();
@@ -211,6 +265,7 @@ interface Fill {
   price: number;
   qty: number;
   isBuy: boolean;
+  orderType: import('../domain/types').OrderType;
 }
 
 /** Raw fills (Rithmic R Trader Pro export) → round-trip trades, FIFO per symbol. */
@@ -223,6 +278,7 @@ function parseFills(headers: string[], rows: string[][], warnings: string[]): Tr
     qty: findCol(headers, COLS.fillQty),
     status: findCol(headers, COLS.status),
     account: findCol(headers, COLS.account),
+    orderType: findCol(headers, COLS.orderType),
   };
   const bySymbol = new Map<string, Fill[]>();
   const accounts = new Map<string, string>();
@@ -240,7 +296,7 @@ function parseFills(headers: string[], rows: string[][], warnings: string[]): Tr
     const isBuy = sideRaw.startsWith('b') || sideRaw === 'long';
     const key = symbol.toUpperCase();
     if (!bySymbol.has(key)) bySymbol.set(key, []);
-    bySymbol.get(key)!.push({ time, price, qty, isBuy });
+    bySymbol.get(key)!.push({ time, price, qty, isBuy, orderType: normalizeOrderType(get(ci.orderType)) });
     const acct = (get(ci.account) ?? '').trim();
     if (acct) accounts.set(key, acct);
   }
@@ -282,6 +338,13 @@ function parseFills(headers: string[], rows: string[][], warnings: string[]): Tr
           account: accounts.get(symbol) ?? '',
           ...blankTradeFields(),
         };
+        t.executions = legFills.map((x) => ({
+          time: x.time,
+          action: x.isBuy ? ('BUY' as const) : ('SELL' as const),
+          qty: x.qty,
+          price: x.price,
+          orderType: x.orderType,
+        }));
         t.importKey = makeImportKey(t);
         trades.push(t);
         legFills = [];

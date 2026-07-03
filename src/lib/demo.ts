@@ -297,6 +297,39 @@ export async function loadDemoData(): Promise<number> {
         source: 'demo',
         account: 'SIM-1',
       };
+      // scale-in/out execution detail (weighted so averages match the trade)
+      if (chance(0.6)) {
+        const mkFills = (
+          total: number,
+          around: number,
+          startMs: number,
+          spanMs: number,
+          action: 'BUY' | 'SELL',
+        ) => {
+          const n = Math.min(total, 1 + Math.floor(rand() * 3));
+          const sizes: number[] = [];
+          let left = total;
+          for (let k = 0; k < n; k++) {
+            const s = k === n - 1 ? left : Math.max(1, Math.floor(left / (n - k)));
+            sizes.push(s);
+            left -= s;
+          }
+          return sizes.map((s2, k) => ({
+            time: iso(new Date(startMs + (spanMs * k) / Math.max(1, n))),
+            action,
+            qty: s2,
+            price: roundTo(around * (1 + (rand() - 0.5) * 0.0008)),
+            orderType: pick(['limit', 'limit', 'market', 'stop'] as const),
+          }));
+        };
+        const spanMs = exit.getTime() - entry.getTime();
+        const inAction = side === 'LONG' ? ('BUY' as const) : ('SELL' as const);
+        const outAction = side === 'LONG' ? ('SELL' as const) : ('BUY' as const);
+        t.executions = [
+          ...mkFills(qty, t.entryPrice, entry.getTime(), spanMs * 0.4, inAction),
+          ...mkFills(qty, t.exitPrice, entry.getTime() + spanMs * 0.6, spanMs * 0.4, outAction),
+        ];
+      }
       t.importKey = makeImportKey(t);
       dayTrades.push(t);
     }

@@ -23,6 +23,18 @@ export interface LinkItem {
   url: string;
 }
 
+export type OrderType = 'market' | 'limit' | 'stop' | 'stop-limit' | 'unknown';
+
+/** A single fill — the building block of a scaled trade. */
+export interface Execution {
+  /** ISO date-time of the fill */
+  time: string;
+  action: 'BUY' | 'SELL';
+  qty: number;
+  price: number;
+  orderType: OrderType;
+}
+
 export interface Trade {
   id?: number;
   /** Trading day, YYYY-MM-DD */
@@ -55,6 +67,8 @@ export interface Trade {
   /** Clickable reference links (news headline, replay, chart share, ...) */
   links?: LinkItem[];
   grades: Partial<Record<CriterionId, GradeLevel>>;
+  /** Individual fills (scale-ins/outs) when the source provides them */
+  executions?: Execution[];
   source: TradeSource;
   account: string;
   /** Dedupe key computed at import time */
