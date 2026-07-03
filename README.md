@@ -1,0 +1,111 @@
+# Edge Intelligence
+
+**The data-centered intelligence platform for futures traders.** Track, analyse and develop trading
+strategies around the 5 Edge Domain framework — with the journal, debrief and coach-grading workflow
+built in, and stunning analytics that show you exactly where your edge is and whether it is growing.
+
+![Dashboard](docs/dashboard.png)
+
+## What it does
+
+### Data in — from the platforms you already trade on
+- **MotiveWave** — export the Trade Log / Trade History to CSV and drop it on the Import page.
+  Entry/exit times, prices, size and realized P&L are read directly.
+- **Rithmic (R Trader Pro)** — export Order History / Fills to CSV. Raw fills are paired **FIFO per
+  contract** into round-trip trades (scale-ins/outs averaged correctly), and P&L is computed from a
+  built-in table of CME/Eurex contract point values (ES, MES, NQ, MNQ, CL, MCL, GC, 6E, ZN, FDAX …).
+- **Any other platform** — any CSV with symbol, entry/exit time, price, quantity and (optionally)
+  P&L columns works. Headers are matched by name; column order and naming variants don't matter.
+- Re-importing the same file is safe — duplicates are detected and skipped.
+- **Everything stays private**: all data lives locally in your browser (IndexedDB). Nothing is ever
+  sent to a server. One-click JSON backup / restore in Settings.
+
+### The 5 Edge Domain framework, built in
+The whole app speaks the AXIA edge-domain language:
+
+1. **Central Banks** — the edge that pays when policy moves the market
+2. **Economic Data** — where blowout numbers and policy collide
+3. **News (Geo-Macro)** — unscheduled headlines and cross-asset moves
+4. **Technicals** — the edge that supports every other domain
+5. **Flow Events** — the survival edge when nothing else is in play
+
+Every trade is classified exactly the way a coach would tag it:
+- **Level 1** — the edge domain
+- **Level 2** — the category inside the domain (Statement/Presser/Speaker…, Candlesticks/Profile/DOM/Footprint…, Auctions/OPEX/Opens/MOC…)
+- **Level 3** — refinement tags with per-domain suggestions (Hawkish, Phase 2, Smash & Grab, Pre-close…) plus free-form tags
+
+![Trade debrief](docs/trade-debrief.png)
+
+### Coach grading — the bar coaches hold you to
+Each trade can be graded on the five criteria (**Trigger recognition, Sizing, Exit discipline,
+Articulation, Post-trade review**) against the *below / at / above standard* rubric of its domain —
+the full rubric text is shown in the grading table for the trade's domain. Your average grade
+profile is charted as a radar in Edge Analytics, so you can see which skill is lagging.
+
+### The full daily cycle — prepare, execute, debrief
+- **Trading Day hub** — preparation, the day's trades and the debrief for one date in a single
+  section, with every video, photo and link for that day gathered in one strip.
+- **Day preparation** — the AXIA preparation template as a structured form: overnights
+  (Dollar/FX, Gold, Oil, EU Stocks, Bunds — moved significantly? implication?), news priced-in vs
+  developing, an events table with expectations and previous reactions, chart analysis
+  (daily / profile / 60m / 5m) and the three hypotheses, each with an in-play trigger and a
+  line-in-the-sand.
+- **Trade debrief** — what you expected vs what happened, what you learned, how you'll apply it,
+  video link, planned risk (giving automatic R-multiples).
+- **Daily debrief** — narrative, comparison with your preparation and hypothesis, lesson, action;
+  1–5 self-scores for preparation and execution quality; the day's trades and P&L shown alongside.
+- **Photos & links everywhere** — attach chart screenshots / phone photos (stored locally,
+  auto-resized) and clickable links to trades, debriefs and preparations.
+- **Exports** — individual trade debriefs and full day packs (prep + trades + debrief + photos) as
+  Markdown, JSON or a print-ready page (save as PDF); any filtered trade list as CSV.
+- **Trader One (Axia) mirroring** — generate an executions CSV (entry + exit fills per round trip)
+  from your MotiveWave imports and hand it to Trader One; on iPhone/iPad the button opens the
+  native share sheet so the file goes straight to the Trader One app or Files.
+- **Study filters** — combine domain, instrument, date and multi-tag filters (setups, phases,
+  data events like NFP / CPI / ISM…) across trades, and filter journal days by the tags of the
+  trades inside them.
+
+### Analytics that answer real questions
+![Analytics](docs/analytics.png)
+
+- Equity curve, daily P&L, 6-month P&L calendar heatmap
+- Net P&L, win rate, profit factor, expectancy ($ and R), payoff ratio, max drawdown, streaks,
+  annualized daily Sharpe, average hold time
+- **Edge by domain** and **best setups** (domain × category) ranked by expectancy
+- **Edge development** — rolling 20-trade expectancy shows edge growing or decaying
+- Time-of-day, day-of-week, hold-time, instrument and direction breakdowns
+- **Review discipline** — % of trades tagged and graded, because the review *is* the development
+- Coach grade radar across the five criteria
+
+### Strategy Lab
+Turn observations into templates and templates into tested strategies: each strategy has a
+hypothesis, rules and a lifecycle (**incubating → testing → active → retired**). Link trades to a
+strategy from the debrief page and the sample stats (trades, net P&L, win rate, expectancy, avg R)
+build automatically.
+
+### The Playbook
+The full 5 Edge Domain playbook as an interactive reference — what to look for, how to classify,
+common mistakes and the grading rubric for every domain — with **your own live stats** (trades, P&L,
+win rate, expectancy) displayed next to each domain.
+
+![Playbook](docs/playbook.png)
+
+## Getting started
+
+```bash
+npm install
+npm run dev       # development server
+npm run build     # production build (output in dist/)
+npm run preview   # serve the production build
+```
+
+Open the app, click **Load demo data** to explore the full platform with a realistic 8-month
+dataset, then clear it in Settings and import your own trades.
+
+## Tech
+
+- React 18 + TypeScript + Vite
+- Dexie (IndexedDB) — local-first, private by design
+- Recharts — visualizations follow a validated dark-surface palette (colorblind-safe categorical
+  colors, diverging profit/loss encoding)
+- No backend, no accounts, no telemetry
