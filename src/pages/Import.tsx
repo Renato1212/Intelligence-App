@@ -201,7 +201,9 @@ export default function ImportPage() {
             <li>
               <b>Record:</b> log in to Trader One and click the bookmark <b>first</b> — a gold “recording” badge
               appears. Then open your trade log / journal pages (expand the date range, scroll through everything you
-              want) so the data loads while it records.
+              want) so the data loads while it records. <b>Also open the Order History / executions view</b> — those
+              rows become the per-fill scale-in/out detail (exact size, price, time and market/limit type) attached
+              to each trade.
             </li>
             <li>
               <b>Finish:</b> click the gold badge — the <span className="mono">edge-capture.json</span> downloads.
@@ -279,6 +281,7 @@ export default function ImportPage() {
                 </h3>
                 <div className="muted small">
                   {capture.items.filter((i) => i.trade.tags.length || i.trade.description).length} carry tags/notes ·{' '}
+                  {capture.items.reduce((s, i) => s + i.executions.length, 0)} fills matched ·{' '}
                   {capture.items.reduce((s, i) => s + i.images.length, 0)} photos · net{' '}
                   <PnL value={capture.items.reduce((s, i) => s + i.trade.pnl, 0)} />
                 </div>
@@ -310,6 +313,7 @@ export default function ImportPage() {
                     <th className="num">P&L</th>
                     <th>Tags</th>
                     <th>Notes</th>
+                    <th className="num">Fills</th>
                     <th className="num">Photos</th>
                   </tr>
                 </thead>
@@ -329,6 +333,7 @@ export default function ImportPage() {
                       <td className="muted small" style={{ maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {item.trade.description}
                       </td>
+                      <td className="num">{item.executions.length || ''}</td>
                       <td className="num">{item.images.length || ''}</td>
                     </tr>
                   ))}
