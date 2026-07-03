@@ -10,6 +10,8 @@ export default function Settings() {
     trades: await db.trades.count(),
     debriefs: await db.debriefs.count(),
     strategies: await db.strategies.count(),
+    preps: await db.preps.count(),
+    photos: await db.photos.count(),
   }), []);
   const toast = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -67,6 +69,14 @@ export default function Settings() {
             <div>
               <div className="tile-label">Strategies</div>
               <div className="tile-value sm">{counts?.strategies ?? '…'}</div>
+            </div>
+            <div>
+              <div className="tile-label">Preparations</div>
+              <div className="tile-value sm">{counts?.preps ?? '…'}</div>
+            </div>
+            <div>
+              <div className="tile-label">Photos</div>
+              <div className="tile-value sm">{counts?.photos ?? '…'}</div>
             </div>
           </div>
           <hr className="divider" />

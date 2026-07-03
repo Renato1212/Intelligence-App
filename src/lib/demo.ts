@@ -1,7 +1,7 @@
-import type { DailyDebrief, DomainId, GradeLevel, Strategy, Trade } from '../domain/types';
+import type { DailyDebrief, DayPrep, DomainId, GradeLevel, Strategy, Trade } from '../domain/types';
 import { DOMAIN_MAP } from '../domain/taxonomy';
 import { pointValue } from './contracts';
-import { db } from './db';
+import { db, emptyPrep } from './db';
 import { makeImportKey } from './importers';
 
 /** Deterministic RNG so the demo dataset is stable between loads. */
@@ -102,7 +102,14 @@ const PROFILES: DomainProfile[] = [
 
 const LEVEL3: Record<DomainId, string[][]> = {
   'central-banks': [['Hawkish'], ['Dovish'], ['Dovish', 'Powell'], ['Hawkish', 'Timiraos']],
-  'economic-data': [['Phase 1', 'Smash and grab'], ['Phase 2', 'Continuation'], ['Phase 2', 'Fade'], ['Phase 3']],
+  'economic-data': [
+    ['Phase 1', 'Smash and grab', 'NFP'],
+    ['Phase 2', 'Continuation', 'CPI'],
+    ['Phase 2', 'Fade', 'ISM'],
+    ['Phase 3', 'CPI'],
+    ['Phase 1', 'Jobless Claims'],
+    ['Phase 2', 'Continuation', 'EIA'],
+  ],
   news: [['Risk-off', 'Hit & Hold'], ['Risk-on'], ['Smash & Grab'], ['Fade', 'Denial'], ['Tariffs'], ['War']],
   technicals: [['Continuation', 'VWAP'], ['Breakout'], ['Reversal'], ['Trend day'], ['P-shape'], ['Double distribution']],
   flow: [['Long', 'Pre-event'], ['Short', 'Pre-event'], ['Long', 'Post-event'], ['Chop']],
@@ -183,6 +190,7 @@ export async function loadDemoData(): Promise<number> {
 
   const trades: Trade[] = [];
   const debriefs: DailyDebrief[] = [];
+  const preps: DayPrep[] = [];
   const start = new Date('2025-11-03T12:00:00');
   const end = new Date('2026-07-01T12:00:00');
   const totalMs = end.getTime() - start.getTime();
@@ -315,9 +323,57 @@ export async function loadDemoData(): Promise<number> {
         executionScore: Math.min(5, 1 + Math.floor(rand() * 3) + (good ? 2 : 0)),
       });
     }
+
+    if (chance(0.4)) {
+      const prep = emptyPrep(date);
+      prep.overnight = {
+        dollarFx: pick(['DXY flat, inside day', 'Dollar bid overnight, +0.3%', 'Euro squeeze on ECB sources story']),
+        gold: pick(['Quiet, holding the range', 'Gold +0.8% — risk-off tone', 'Drifting lower with yields up']),
+        oil: pick(['Crude flat into inventories', 'MCL +1.2% on supply headline', 'Selling off from the bounce']),
+        euStocks: pick(['DAX balanced, low volume', 'EU stocks gap higher with US futures', 'Weak open, holding VWAP']),
+        bunds: pick(['Bunds unchanged', 'Bid with the risk-off move', 'Offered into supply']),
+      };
+      prep.overnightMoved = pick([
+        'Gold and bonds both bid — consistent risk-off read across markets.',
+        'One-market move only (crude on the headline); others quiet, so not a regime signal.',
+        'Nothing significant overnight; expect the data window to set the tone.',
+      ]);
+      prep.overnightImplication = pick([
+        'Risk-off backdrop favours short setups in equities; keep size smaller against the trend.',
+        'No overnight lean — trade the profile levels and let the open show direction.',
+        'If the dollar move holds, 6E continuation is the cleanest expression.',
+      ]);
+      prep.newsPricedIn = 'Yesterday’s CPI reaction fully played out; market treats it as done.';
+      prep.newsDeveloping = 'Tariff story still open — watch for counter-response headlines; crude and MNQ react best.';
+      if (chance(0.6)) {
+        prep.events = [
+          { time: '13:30', name: pick(['NFP', 'CPI', 'Jobless Claims', 'Retail Sales']), expectations: 'consensus in line, range tight', notes: 'last release: phase-1 spike then continuation' },
+          { time: '15:00', name: pick(['ISM', 'Consumer Confidence', 'Fed speaker']), expectations: 'watch prices-paid component', notes: 'usually second-tier unless big miss' },
+        ];
+      }
+      prep.dailyChart = pick([
+        'Uptrend intact, no significant swing broken. Volume average, ranges contracting.',
+        'Yesterday broke the swing low — direction now down/ranging. ATR elevated.',
+        'Ranging week; yesterday an inside day. No weight on the candle shape.',
+      ]);
+      prep.profile = pick([
+        'Yesterday a neutral day, close mid-value — balance likely; fade the extremes.',
+        'Trend day up yesterday; look for one-time-framing continuation or early liquidation break.',
+        'Double distribution with a clean LVN — that node is the line in the sand.',
+      ]);
+      prep.sixtyMin = 'Move built in two legs; next leg needs the overnight high cleared. Open space above, sticky below.';
+      prep.fiveMin = 'Areas of interest at yesterday’s VAL and the single prints; delta ended positive — longs may be trapped if we open below.';
+      prep.hypotheses = [
+        { title: 'H1 Red', inPlay: 'On break of overnight low', expectation: 'Sweep to yesterday’s single prints, rotational after', lineInSand: 'Back above VWAP' },
+        { title: 'H2 Blue', inPlay: 'Inside yesterday’s value at the open', expectation: 'Balance day, fade the elastic band extremes', lineInSand: 'Value break either side' },
+        { title: 'H3 Green', inPlay: 'Open above value and hold first pullback', expectation: 'Trend into the open space above', lineInSand: 'Acceptance back inside value' },
+      ];
+      preps.push(prep);
+    }
   }
 
   await db.trades.bulkAdd(trades);
   await db.debriefs.bulkAdd(debriefs);
+  await db.preps.bulkAdd(preps);
   return trades.length;
 }

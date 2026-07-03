@@ -1,10 +1,12 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { MediaEditor } from '../components/media';
 import { DomainChip, PnL, SideBadge, useToast } from '../components/ui';
 import { CRITERIA, DOMAINS, domainOf, GRADE_LEVELS } from '../domain/taxonomy';
 import type { CriterionId, GradeLevel, Trade } from '../domain/types';
 import { db } from '../lib/db';
+import { downloadFile, openPrintView, tradeDebriefHtml, tradeDebriefMarkdown } from '../lib/exporters';
 import { fmtDate, fmtDuration, fmtMoney, fmtR, fmtTime } from '../lib/format';
 import { rMultiple } from '../lib/stats';
 
@@ -18,7 +20,7 @@ export default function TradeDetail() {
   const [tagInput, setTagInput] = useState('');
 
   useEffect(() => {
-    if (trade) setDraft({ ...trade, tags: [...trade.tags], grades: { ...trade.grades } });
+    if (trade) setDraft({ links: [], ...trade, tags: [...trade.tags], grades: { ...trade.grades } });
   }, [trade]);
 
   if (!trade || !draft) {
@@ -55,8 +57,18 @@ export default function TradeDetail() {
 
   const remove = async () => {
     if (!confirm('Delete this trade? This cannot be undone.')) return;
+    await db.photos.where('[parentType+parentId]').equals(['trade', trade.id!]).delete();
     await db.trades.delete(trade.id!);
     nav('/trades');
+  };
+
+  const exportDebrief = async (format: 'md' | 'json' | 'print') => {
+    const photos = await db.photos.where('[parentType+parentId]').equals(['trade', trade.id!]).toArray();
+    const stamp = `${draft.date}-${draft.instrument}`;
+    if (format === 'md') downloadFile(`trade-debrief-${stamp}.md`, tradeDebriefMarkdown(draft, photos), 'text/markdown');
+    else if (format === 'json')
+      downloadFile(`trade-debrief-${stamp}.json`, JSON.stringify({ ...draft, photos: photos.map((p) => ({ ...p, dataUrl: `[image ${p.name}]` })) }, null, 2), 'application/json');
+    else openPrintView(`Trade debrief ${draft.instrument} ${fmtDate(draft.date)}`, tradeDebriefHtml(draft, photos));
   };
 
   return (
@@ -77,6 +89,15 @@ export default function TradeDetail() {
         <div className="row">
           <button className="btn danger sm" onClick={remove}>
             Delete
+          </button>
+          <button className="btn sm" title="Export as Markdown" onClick={() => exportDebrief('md')}>
+            ⬇ MD
+          </button>
+          <button className="btn sm" title="Print-ready view — save as PDF from the print dialog" onClick={() => exportDebrief('print')}>
+            ⬇ PDF
+          </button>
+          <button className="btn sm" title="Structured data export" onClick={() => exportDebrief('json')}>
+            ⬇ JSON
           </button>
           <Link to="/trades" className="btn sm">
             Back
@@ -243,6 +264,13 @@ export default function TradeDetail() {
                 Open video ↗
               </a>
             )}
+            <hr className="divider" />
+            <MediaEditor
+              parentType="trade"
+              parentId={trade.id ?? null}
+              links={draft.links ?? []}
+              onLinksChange={(links) => set('links', links)}
+            />
           </div>
         </div>
 

@@ -5,7 +5,8 @@ import { DomainChip, EmptyState, PnL, SideBadge } from '../components/ui';
 import { DOMAINS, categoryLabel } from '../domain/taxonomy';
 import type { Trade } from '../domain/types';
 import { db } from '../lib/db';
-import { fmtDate, fmtDuration, fmtMoney, fmtPct, fmtR, fmtTime } from '../lib/format';
+import { downloadFile, tradesToCSV } from '../lib/exporters';
+import { fmtDate, fmtDuration, fmtMoney, fmtPct, fmtR, fmtTime, todayISO } from '../lib/format';
 import { computeStats, rMultiple } from '../lib/stats';
 
 type SortKey = 'time' | 'pnl' | 'instrument';
@@ -20,6 +21,7 @@ export default function Trades() {
   const [search, setSearch] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [sort, setSort] = useState<SortKey>('time');
   const [asc, setAsc] = useState(false);
 
@@ -28,12 +30,23 @@ export default function Trades() {
     [trades],
   );
 
+  /** All level-3 tags in the journal, most used first — the study filter. */
+  const allTags = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const t of trades ?? []) for (const tag of t.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([tag]) => tag);
+  }, [trades]);
+
+  const toggleTag = (tag: string) =>
+    setSelectedTags((cur) => (cur.includes(tag) ? cur.filter((t) => t !== tag) : [...cur, tag]));
+
   const filtered = useMemo(() => {
     let list = trades ?? [];
     if (strategyId != null) list = list.filter((t) => t.strategyId === strategyId);
     if (domain === 'untagged') list = list.filter((t) => !t.domain);
     else if (domain) list = list.filter((t) => t.domain === domain);
     if (instrument) list = list.filter((t) => t.instrument === instrument);
+    if (selectedTags.length) list = list.filter((t) => selectedTags.every((tag) => t.tags.includes(tag)));
     if (from) list = list.filter((t) => t.date >= from);
     if (to) list = list.filter((t) => t.date <= to);
     if (search.trim()) {
@@ -52,7 +65,7 @@ export default function Trades() {
       if (sort === 'instrument') return a.instrument.localeCompare(b.instrument) * dir;
       return a.entryTime.localeCompare(b.entryTime) * dir;
     });
-  }, [trades, strategyId, domain, instrument, search, from, to, sort, asc]);
+  }, [trades, strategyId, domain, instrument, selectedTags, search, from, to, sort, asc]);
 
   const stats = useMemo(() => computeStats(filtered), [filtered]);
 
@@ -98,6 +111,13 @@ export default function Trades() {
             expectancy {fmtMoney(stats.expectancy, { sign: true })}
           </p>
         </div>
+        <button
+          className="btn sm"
+          title="Download the current filtered view as CSV"
+          onClick={() => downloadFile(`trades-export-${todayISO()}.csv`, tradesToCSV(filtered), 'text/csv')}
+        >
+          ⬇ Export CSV ({filtered.length})
+        </button>
       </div>
 
       <div className="card" style={{ marginBottom: 14 }}>
@@ -119,6 +139,26 @@ export default function Trades() {
           <input type="date" value={to} onChange={(e) => setTo(e.target.value)} title="To date" />
           <input placeholder="Search notes, tags…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ minWidth: 170 }} />
         </div>
+        {allTags.length > 0 && (
+          <>
+            <hr className="divider" />
+            <div className="row" style={{ gap: 6 }}>
+              <span className="small muted" style={{ marginRight: 4 }}>
+                Study by tag{selectedTags.length > 1 ? ' (all selected must match)' : ''}:
+              </span>
+              {allTags.slice(0, 24).map((tag) => (
+                <span key={tag} className={`chip clickable ${selectedTags.includes(tag) ? 'selected' : ''}`} onClick={() => toggleTag(tag)}>
+                  {tag}
+                </span>
+              ))}
+              {selectedTags.length > 0 && (
+                <button className="btn sm" onClick={() => setSelectedTags([])}>
+                  Clear tags
+                </button>
+              )}
+            </div>
+          </>
+        )}
       </div>
 
       <div className="card table-wrap">

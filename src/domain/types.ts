@@ -18,6 +18,11 @@ export type CriterionId =
 
 export type TradeSource = 'manual' | 'motivewave' | 'rithmic' | 'csv' | 'demo';
 
+export interface LinkItem {
+  label: string;
+  url: string;
+}
+
 export interface Trade {
   id?: number;
   /** Trading day, YYYY-MM-DD */
@@ -47,6 +52,8 @@ export interface Trade {
   learned: string;
   applyNext: string;
   videoUrl: string;
+  /** Clickable reference links (news headline, replay, chart share, ...) */
+  links?: LinkItem[];
   grades: Partial<Record<CriterionId, GradeLevel>>;
   source: TradeSource;
   account: string;
@@ -66,6 +73,68 @@ export interface DailyDebrief {
   /** 1-5 self scores */
   prepScore: number | null;
   executionScore: number | null;
+  /** Recording of the trading day / review video */
+  videoUrl?: string;
+  links?: LinkItem[];
+}
+
+export interface PrepEvent {
+  time: string;
+  name: string;
+  expectations: string;
+  notes: string;
+}
+
+export interface Hypothesis {
+  /** e.g. "H1 Red", "H2 Blue", "H3 Green" */
+  title: string;
+  inPlay: string;
+  lineInSand: string;
+  expectation: string;
+}
+
+/** Pre-trading-day preparation, following the AXIA day preparation template. */
+export interface DayPrep {
+  id?: number;
+  date: string;
+  /** Overnight read per risk-sense market */
+  overnight: {
+    dollarFx: string;
+    gold: string;
+    oil: string;
+    euStocks: string;
+    bunds: string;
+  };
+  /** Moved significantly? Same movement or one market alone? */
+  overnightMoved: string;
+  /** Implication for your main markets */
+  overnightImplication: string;
+  /** News: story that has happened — how did markets react, is it important? */
+  newsPricedIn: string;
+  /** News: story yet to conclude — how to trade a development, where from? */
+  newsDeveloping: string;
+  events: PrepEvent[];
+  /** Daily chart: direction change, current direction, candle, volume, ranges/ATR */
+  dailyChart: string;
+  /** Profile analysis (RTH): day type, control, value, open vs value, LIS, references */
+  profile: string;
+  /** 60m: scope of movement, structure, positioning */
+  sixtyMin: string;
+  /** 5m: areas of interest, how trades play out, delta read */
+  fiveMin: string;
+  hypotheses: Hypothesis[];
+  videoUrl?: string;
+  links?: LinkItem[];
+}
+
+/** Image attachment stored locally (IndexedDB), linked to a parent record. */
+export interface Photo {
+  id?: number;
+  parentType: 'trade' | 'debrief' | 'prep';
+  parentId: number;
+  name: string;
+  dataUrl: string;
+  createdAt: string;
 }
 
 export type StrategyStatus = 'incubating' | 'testing' | 'active' | 'retired';

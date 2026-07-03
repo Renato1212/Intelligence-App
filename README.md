@@ -42,11 +42,28 @@ Articulation, Post-trade review**) against the *below / at / above standard* rub
 the full rubric text is shown in the grading table for the trade's domain. Your average grade
 profile is charted as a radar in Edge Analytics, so you can see which skill is lagging.
 
-### Debrief workflow
+### The full daily cycle — prepare, execute, debrief
+- **Trading Day hub** — preparation, the day's trades and the debrief for one date in a single
+  section, with every video, photo and link for that day gathered in one strip.
+- **Day preparation** — the AXIA preparation template as a structured form: overnights
+  (Dollar/FX, Gold, Oil, EU Stocks, Bunds — moved significantly? implication?), news priced-in vs
+  developing, an events table with expectations and previous reactions, chart analysis
+  (daily / profile / 60m / 5m) and the three hypotheses, each with an in-play trigger and a
+  line-in-the-sand.
 - **Trade debrief** — what you expected vs what happened, what you learned, how you'll apply it,
   video link, planned risk (giving automatic R-multiples).
 - **Daily debrief** — narrative, comparison with your preparation and hypothesis, lesson, action;
   1–5 self-scores for preparation and execution quality; the day's trades and P&L shown alongside.
+- **Photos & links everywhere** — attach chart screenshots / phone photos (stored locally,
+  auto-resized) and clickable links to trades, debriefs and preparations.
+- **Exports** — individual trade debriefs and full day packs (prep + trades + debrief + photos) as
+  Markdown, JSON or a print-ready page (save as PDF); any filtered trade list as CSV.
+- **Trader One (Axia) mirroring** — generate an executions CSV (entry + exit fills per round trip)
+  from your MotiveWave imports and hand it to Trader One; on iPhone/iPad the button opens the
+  native share sheet so the file goes straight to the Trader One app or Files.
+- **Study filters** — combine domain, instrument, date and multi-tag filters (setups, phases,
+  data events like NFP / CPI / ISM…) across trades, and filter journal days by the tags of the
+  trades inside them.
 
 ### Analytics that answer real questions
 ![Analytics](docs/analytics.png)

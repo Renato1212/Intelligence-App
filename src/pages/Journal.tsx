@@ -1,36 +1,18 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { DomainChip, PnL, SideBadge, useToast } from '../components/ui';
-import type { DailyDebrief } from '../domain/types';
+import { Link, useNavigate } from 'react-router-dom';
+import { DebriefEditor } from '../components/DebriefEditor';
+import { DomainChip, PnL, SideBadge } from '../components/ui';
 import { db } from '../lib/db';
 import { fmtDate, fmtMoney, fmtTime, todayISO, weekdayName } from '../lib/format';
 import { computeStats } from '../lib/stats';
-
-const EMPTY: Omit<DailyDebrief, 'id'> = {
-  date: todayISO(),
-  narrative: '',
-  comparison: '',
-  learned: '',
-  applyNext: '',
-  prepScore: null,
-  executionScore: null,
-};
 
 export default function Journal() {
   const debriefs = useLiveQuery(() => db.debriefs.orderBy('date').reverse().toArray(), []);
   const trades = useLiveQuery(() => db.trades.toArray(), []) ?? [];
   const [selectedDate, setSelectedDate] = useState<string>(todayISO());
-  const [draft, setDraft] = useState<Omit<DailyDebrief, 'id'> & { id?: number }>({ ...EMPTY });
-  const toast = useToast();
+  const [dayTag, setDayTag] = useState('');
   const nav = useNavigate();
-
-  const existing = useMemo(() => (debriefs ?? []).find((d) => d.date === selectedDate), [debriefs, selectedDate]);
-
-  // load selection into draft when the date or stored entry changes
-  useMemo(() => {
-    setDraft(existing ? { ...existing } : { ...EMPTY, date: selectedDate });
-  }, [existing, selectedDate]);
 
   const dayTrades = useMemo(
     () => trades.filter((t) => t.date === selectedDate).sort((a, b) => a.entryTime.localeCompare(b.entryTime)),
@@ -38,33 +20,21 @@ export default function Journal() {
   );
   const dayStats = useMemo(() => computeStats(dayTrades), [dayTrades]);
 
-  const save = async () => {
-    const record = { ...draft, date: selectedDate };
-    if (existing?.id) await db.debriefs.put({ ...record, id: existing.id });
-    else await db.debriefs.add(record);
-    toast('Daily debrief saved');
-  };
+  const allTags = useMemo(() => {
+    const set = new Set<string>();
+    for (const t of trades) for (const tag of t.tags) set.add(tag);
+    return [...set].sort();
+  }, [trades]);
 
-  const set = <K extends keyof DailyDebrief>(k: K, v: DailyDebrief[K]) => setDraft({ ...draft, [k]: v });
-
-  const scorePicker = (label: string, key: 'prepScore' | 'executionScore') => (
-    <div>
-      <div className="small muted" style={{ marginBottom: 5 }}>
-        {label}
-      </div>
-      <div className="row">
-        {[1, 2, 3, 4, 5].map((n) => (
-          <span
-            key={n}
-            className={`chip clickable ${draft[key] === n ? 'selected' : ''}`}
-            onClick={() => set(key, draft[key] === n ? null : n)}
-          >
-            {n}
-          </span>
-        ))}
-      </div>
-    </div>
-  );
+  /** Days shown in the sidebar: debrief days, optionally narrowed to days containing a tag. */
+  const pastDays = useMemo(() => {
+    let list = debriefs ?? [];
+    if (dayTag) {
+      const daysWithTag = new Set(trades.filter((t) => t.tags.includes(dayTag)).map((t) => t.date));
+      list = list.filter((d) => daysWithTag.has(d.date));
+    }
+    return list;
+  }, [debriefs, trades, dayTag]);
 
   return (
     <>
@@ -75,12 +45,17 @@ export default function Journal() {
             Describe what happened, compare it with your preparation, extract the lesson, decide how to apply it.
           </p>
         </div>
-        <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} />
+        <div className="row">
+          <Link to={`/day?date=${selectedDate}`} className="btn sm">
+            Open Trading Day view
+          </Link>
+          <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} />
+        </div>
       </div>
 
       <div className="grid" style={{ gridTemplateColumns: '2fr 1fr', alignItems: 'start' }}>
         <div className="stack">
-          <div className="card stack">
+          <div className="card">
             <div className="card-title">
               {weekdayName(selectedDate)} {fmtDate(selectedDate)}
               <span className="hint">
@@ -93,30 +68,7 @@ export default function Journal() {
                 )}
               </span>
             </div>
-            <label className="field">
-              <span>What happened, what you did and how you were feeling during this trading day</span>
-              <textarea rows={5} value={draft.narrative} onChange={(e) => set('narrative', e.target.value)} />
-            </label>
-            <label className="field">
-              <span>Compare what happened with your preparation and hypothesis for this day</span>
-              <textarea rows={4} value={draft.comparison} onChange={(e) => set('comparison', e.target.value)} />
-            </label>
-            <label className="field">
-              <span>Did you learn something?</span>
-              <textarea rows={3} value={draft.learned} onChange={(e) => set('learned', e.target.value)} />
-            </label>
-            <label className="field">
-              <span>Is there something you can do to apply what you learned?</span>
-              <textarea rows={3} value={draft.applyNext} onChange={(e) => set('applyNext', e.target.value)} />
-            </label>
-            <div className="row" style={{ gap: 26 }}>
-              {scorePicker('Preparation quality (1–5)', 'prepScore')}
-              {scorePicker('Execution quality (1–5)', 'executionScore')}
-              <span style={{ flex: 1 }} />
-              <button className="btn primary" onClick={save}>
-                {existing ? 'Update debrief' : 'Save debrief'}
-              </button>
-            </div>
+            <DebriefEditor date={selectedDate} />
           </div>
 
           {dayTrades.length > 0 && (
@@ -130,6 +82,7 @@ export default function Journal() {
                       <th>Inst</th>
                       <th>Side</th>
                       <th>Domain</th>
+                      <th>Tags</th>
                       <th className="num">P&L</th>
                     </tr>
                   </thead>
@@ -144,6 +97,7 @@ export default function Journal() {
                         <td>
                           <DomainChip id={t.domain} />
                         </td>
+                        <td className="muted small">{t.tags.slice(0, 3).join(' · ')}</td>
                         <td className="num">
                           <PnL value={t.pnl} />
                         </td>
@@ -158,14 +112,22 @@ export default function Journal() {
 
         <div className="card">
           <div className="card-title">Past debriefs</div>
-          {!debriefs?.length && <div className="muted small">No debriefs yet — write your first one.</div>}
+          <select value={dayTag} onChange={(e) => setDayTag(e.target.value)} style={{ width: '100%', marginBottom: 10 }} title="Show only days containing trades with this tag">
+            <option value="">All days — filter by tag…</option>
+            {allTags.map((t) => (
+              <option key={t} value={t}>
+                Days with “{t}” trades
+              </option>
+            ))}
+          </select>
+          {!pastDays.length && <div className="muted small">{dayTag ? 'No debriefed days contain that tag.' : 'No debriefs yet — write your first one.'}</div>}
           <div className="stack" style={{ gap: 6 }}>
-            {(debriefs ?? []).slice(0, 30).map((d) => {
+            {pastDays.slice(0, 40).map((d) => {
               const dayPnl = trades.filter((t) => t.date === d.date).reduce((s, t) => s + t.pnl, 0);
               return (
                 <div
                   key={d.id}
-                  className="spread clickable"
+                  className="spread"
                   style={{
                     padding: '8px 10px',
                     borderRadius: 6,
@@ -177,9 +139,7 @@ export default function Journal() {
                   <span>
                     {weekdayName(d.date)} {fmtDate(d.date)}
                   </span>
-                  <span className={dayPnl > 0 ? 'pos' : dayPnl < 0 ? 'neg' : 'muted'}>
-                    {fmtMoney(dayPnl, { sign: true, compact: true })}
-                  </span>
+                  <span className={dayPnl > 0 ? 'pos' : dayPnl < 0 ? 'neg' : 'muted'}>{fmtMoney(dayPnl, { sign: true, compact: true })}</span>
                 </div>
               );
             })}

@@ -3,6 +3,7 @@ import { ToastProvider } from './components/ui';
 import Dashboard from './pages/Dashboard';
 import Trades from './pages/Trades';
 import TradeDetail from './pages/TradeDetail';
+import TradingDay from './pages/TradingDay';
 import Journal from './pages/Journal';
 import Analytics from './pages/Analytics';
 import Playbook from './pages/Playbook';
@@ -14,6 +15,7 @@ const I = {
   dashboard: <path d="M3 3h7v9H3zM14 3h7v5h-7zM14 12h7v9h-7zM3 16h7v5H3z" />,
   trades: <path d="M3 17l6-6 4 4 8-8M15 7h6v6" />,
   journal: <path d="M4 4h12a2 2 0 012 2v14H6a2 2 0 01-2-2V4zM4 4v14M9 9h6M9 13h4" />,
+  day: <path d="M8 2v4M16 2v4M3 9h18M5 4h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2zM9 14l2 2 4-4" />,
   analytics: <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" />,
   playbook: <path d="M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5" />,
   strategies: <path d="M12 2v4M12 18v4M2 12h4M18 12h4M12 8a4 4 0 100 8 4 4 0 000-8z" />,
@@ -54,6 +56,7 @@ export default function App() {
           <Nav to="/" icon={I.dashboard} label="Dashboard" end />
           <Nav to="/analytics" icon={I.analytics} label="Edge Analytics" />
           <div className="nav-section">Journal</div>
+          <Nav to="/day" icon={I.day} label="Trading Day" />
           <Nav to="/trades" icon={I.trades} label="Trades" />
           <Nav to="/journal" icon={I.journal} label="Daily Debrief" />
           <div className="nav-section">Development</div>
@@ -66,6 +69,7 @@ export default function App() {
         <main className="main">
           <Routes>
             <Route path="/" element={<Dashboard />} />
+            <Route path="/day" element={<TradingDay />} />
             <Route path="/trades" element={<Trades />} />
             <Route path="/trades/:id" element={<TradeDetail />} />
             <Route path="/journal" element={<Journal />} />
