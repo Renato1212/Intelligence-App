@@ -94,7 +94,7 @@ export function isCapturePayload(text: string): boolean {
 /* ---------- JSON API response extraction (v2 network recording) ---------- */
 
 const JSON_KEYS: Record<string, string[]> = {
-  symbol: ['symbol', 'instrument', 'contract', 'market', 'ticker', 'inst', 'sym', 'symbolname', 'instrumentname'],
+  symbol: ['symbol', 'instrument', 'contract', 'market', 'ticker', 'inst', 'sym', 'symbolname', 'instrumentname', 'product', 'productcode', 'productname'],
   date: ['date', 'tradedate', 'day', 'sessiondate'],
   entryTime: ['entrytime', 'opentime', 'entrydate', 'opened', 'openedat', 'openat', 'entryts', 'entryat', 'starttime', 'open', 'entry'],
   exitTime: ['exittime', 'closetime', 'exitdate', 'closed', 'closedat', 'closeat', 'endtime', 'close', 'exit'],
@@ -217,7 +217,7 @@ function objectToItem(raw: Record<string, unknown>): CaptureItem | null {
   const tags = Array.isArray(tagsRaw)
     ? tagsRaw.map((x) => String(x).trim()).filter(Boolean)
     : typeof tagsRaw === 'string'
-      ? tagsRaw.split(/[;,·|]/).map((x) => x.trim()).filter(Boolean)
+      ? tagsRaw.split(/[;,·|×]/).map((x) => x.trim()).filter(Boolean)
       : [];
   const imagesRaw = pickKey(flat, 'images');
   const imageList = Array.isArray(imagesRaw) ? imagesRaw : typeof imagesRaw === 'string' ? [imagesRaw] : [];
