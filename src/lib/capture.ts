@@ -1,6 +1,9 @@
-import type { Trade } from '../domain/types';
+import type { Side, Trade } from '../domain/types';
+import { domainFromLabel } from '../domain/taxonomy';
+import { toISODateTime, toNumber } from './csv';
 import { db } from './db';
-import { importCSV } from './importers';
+import { importCSV, makeImportKey } from './importers';
+import { symbolRoot } from './contracts';
 
 /**
  * "Edge Capture" — the screen-extraction path for platforms with no API and
@@ -20,6 +23,19 @@ export interface CapturePayload {
     rows: string[][];
     rowImages?: { row: number; src: string; dataUrl?: string }[];
   }[];
+  /** v2: JSON API responses recorded while the user browsed the platform */
+  requests?: { url: string; body: string }[];
+  /** v2: page structure hints for debugging unsupported layouts */
+  diagnostics?: {
+    tables?: number;
+    ariaGrids?: number;
+    iframes?: number;
+    crossOriginFrames?: number;
+    canvases?: number;
+    flutter?: boolean;
+    jsonResponses?: number;
+    textSample?: string;
+  };
 }
 
 export interface CaptureItem {
@@ -49,6 +65,187 @@ export function isCapturePayload(text: string): boolean {
   } catch {
     return false;
   }
+}
+
+/* ---------- JSON API response extraction (v2 network recording) ---------- */
+
+const JSON_KEYS: Record<string, string[]> = {
+  symbol: ['symbol', 'instrument', 'contract', 'market', 'ticker', 'inst', 'sym', 'symbolname', 'instrumentname'],
+  date: ['date', 'tradedate', 'day', 'sessiondate'],
+  entryTime: ['entrytime', 'opentime', 'entrydate', 'opened', 'openedat', 'openat', 'entryts', 'entryat', 'starttime', 'open', 'entry'],
+  exitTime: ['exittime', 'closetime', 'exitdate', 'closed', 'closedat', 'closeat', 'endtime', 'close', 'exit'],
+  entryPrice: ['entryprice', 'openprice', 'avgentryprice', 'pricein', 'avgopen', 'entryavg'],
+  exitPrice: ['exitprice', 'closeprice', 'avgexitprice', 'priceout', 'avgclose', 'exitavg'],
+  qty: ['qty', 'quantity', 'size', 'contracts', 'volume', 'lots', 'totalsize', 'filledqty'],
+  side: ['side', 'direction', 'position', 'buysell', 'longshort', 'positiontype'],
+  pnl: ['pnl', 'profit', 'profitloss', 'realizedpnl', 'netpnl', 'pl', 'realized', 'netprofit', 'grosspnl'],
+  fees: ['commission', 'commissions', 'fees', 'fee'],
+  tags: ['tags', 'labels', 'level3'],
+  domain: ['tag', 'domain', 'primarytag', 'edgedomain'],
+  category: ['subtag', 'category', 'subcategory'],
+  description: ['description', 'notes', 'note', 'comment', 'comments', 'journal', 'text', 'debrief'],
+  learned: ['learned', 'lesson', 'whatdidyoulearn'],
+  applyNext: ['apply', 'howtoapply', 'application'],
+  video: ['video', 'videourl', 'recording', 'videolink'],
+  images: ['images', 'screenshots', 'photos', 'attachments', 'image', 'screenshot', 'imageurls'],
+  account: ['account', 'accountid', 'accountname'],
+};
+
+function normKey(k: string): string {
+  return k.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/** Flatten one level of nesting: {entry:{price:1}} → {'entryprice':1}. */
+function flatten(obj: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      for (const [k2, v2] of Object.entries(v as Record<string, unknown>)) out[normKey(k + k2)] = v2;
+    }
+    out[normKey(k)] = v;
+  }
+  return out;
+}
+
+function pickKey(flat: Record<string, unknown>, field: string): unknown {
+  for (const alias of JSON_KEYS[field]) {
+    if (alias in flat && flat[alias] != null && flat[alias] !== '') return flat[alias];
+  }
+  return undefined;
+}
+
+function toWhen(v: unknown, dateHint?: string): string | null {
+  if (v == null) return null;
+  if (typeof v === 'number') {
+    const ms = v > 1e12 ? v : v > 1e9 ? v * 1000 : NaN;
+    if (isNaN(ms)) return null;
+    const d = new Date(ms);
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  }
+  const s = String(v).trim();
+  if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(s) && dateHint) return toISODateTime(`${dateHint} ${s}`);
+  if (/^\d{10}(\d{3})?$/.test(s)) return toWhen(Number(s));
+  return toISODateTime(s);
+}
+
+function toNum(v: unknown): number | null {
+  if (typeof v === 'number') return isFinite(v) ? v : null;
+  return toNumber(String(v ?? ''));
+}
+
+/** Recursively collect arrays of plain objects from a parsed JSON value. */
+function collectArrays(node: unknown, out: Record<string, unknown>[][], depth = 0): void {
+  if (depth > 6 || node == null) return;
+  if (Array.isArray(node)) {
+    if (node.length && node.every((x) => x && typeof x === 'object' && !Array.isArray(x))) {
+      out.push(node as Record<string, unknown>[]);
+    }
+    for (const x of node.slice(0, 50)) collectArrays(x, out, depth + 1);
+  } else if (typeof node === 'object') {
+    for (const v of Object.values(node as Record<string, unknown>)) collectArrays(v, out, depth + 1);
+  }
+}
+
+function blankJournal() {
+  return {
+    plannedRisk: null,
+    domain: null,
+    category: null,
+    tags: [] as string[],
+    strategyId: null,
+    description: '',
+    learned: '',
+    applyNext: '',
+    videoUrl: '',
+    grades: {},
+  };
+}
+
+function objectToItem(raw: Record<string, unknown>): CaptureItem | null {
+  const flat = flatten(raw);
+  const symbolRaw = pickKey(flat, 'symbol');
+  if (typeof symbolRaw !== 'string' || !symbolRaw.trim() || symbolRaw.length > 20) return null;
+  const dateHint = pickKey(flat, 'date') != null ? String(pickKey(flat, 'date')) : undefined;
+  const entryTime = toWhen(pickKey(flat, 'entryTime'), dateHint) ?? (dateHint ? toISODateTime(dateHint) : null);
+  if (!entryTime) return null;
+  const pnl = toNum(pickKey(flat, 'pnl'));
+  const entryPrice = toNum(pickKey(flat, 'entryPrice'));
+  const exitPrice = toNum(pickKey(flat, 'exitPrice'));
+  if (pnl == null && entryPrice == null) return null;
+
+  const exitTime = toWhen(pickKey(flat, 'exitTime'), dateHint) ?? entryTime;
+  let qty = toNum(pickKey(flat, 'qty')) ?? 1;
+  const sideRaw = String(pickKey(flat, 'side') ?? '').toLowerCase();
+  let side: Side;
+  if (sideRaw.startsWith('l') || sideRaw.startsWith('b')) side = 'LONG';
+  else if (sideRaw.startsWith('s')) side = 'SHORT';
+  else if (qty < 0) side = 'SHORT';
+  else if (pnl != null && entryPrice != null && exitPrice != null && exitPrice !== entryPrice) {
+    side = Math.sign(exitPrice - entryPrice) === Math.sign(pnl) ? 'LONG' : 'SHORT';
+  } else side = 'LONG';
+  qty = Math.abs(qty) || 1;
+
+  const tagsRaw = pickKey(flat, 'tags');
+  const tags = Array.isArray(tagsRaw)
+    ? tagsRaw.map((x) => String(x).trim()).filter(Boolean)
+    : typeof tagsRaw === 'string'
+      ? tagsRaw.split(/[;,·|]/).map((x) => x.trim()).filter(Boolean)
+      : [];
+  const imagesRaw = pickKey(flat, 'images');
+  const imageList = Array.isArray(imagesRaw) ? imagesRaw : typeof imagesRaw === 'string' ? [imagesRaw] : [];
+  const imageLinks = imageList.map((x) => String(x)).filter((u) => /^https?:/.test(u));
+
+  const t: Trade = {
+    date: entryTime.slice(0, 10),
+    instrument: symbolRoot(symbolRaw.trim()),
+    side,
+    entryTime,
+    exitTime,
+    entryPrice: entryPrice ?? 0,
+    exitPrice: exitPrice ?? 0,
+    qty,
+    pnl: pnl ?? 0,
+    fees: Math.abs(toNum(pickKey(flat, 'fees')) ?? 0),
+    source: 'capture',
+    account: String(pickKey(flat, 'account') ?? '').slice(0, 40),
+    ...blankJournal(),
+  };
+  t.domain = domainFromLabel(typeof pickKey(flat, 'domain') === 'string' ? (pickKey(flat, 'domain') as string) : null);
+  const cat = pickKey(flat, 'category');
+  t.category = typeof cat === 'string' && cat.trim() ? cat.trim().toLowerCase() : null;
+  t.tags = tags;
+  const str = (f: string) => {
+    const v = pickKey(flat, f);
+    return typeof v === 'string' ? v.trim() : '';
+  };
+  t.description = str('description');
+  t.learned = str('learned');
+  t.applyNext = str('applyNext');
+  t.videoUrl = str('video');
+  t.importKey = makeImportKey(t);
+  return { trade: t, images: [], imageLinks };
+}
+
+function itemsFromRequests(requests: { url: string; body: string }[]): CaptureItem[] {
+  const items: CaptureItem[] = [];
+  for (const req of requests) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(req.body);
+    } catch {
+      continue;
+    }
+    const arrays: Record<string, unknown>[][] = [];
+    collectArrays(parsed, arrays);
+    for (const arr of arrays) {
+      const converted = arr.map(objectToItem).filter((x): x is CaptureItem => x != null);
+      // only trust arrays where most objects look like trades — filters out
+      // config lists, watchlists, user settings etc.
+      if (converted.length && converted.length >= arr.length * 0.5) items.push(...converted);
+    }
+  }
+  return items;
 }
 
 export function parseCapture(text: string): CaptureParseResult {
@@ -92,10 +289,32 @@ export function parseCapture(text: string): CaptureParseResult {
     });
   }
 
+  // v2: trades recorded from the page's own JSON API traffic
+  if (payload.requests?.length) {
+    for (const item of itemsFromRequests(payload.requests)) {
+      if (item.trade.importKey && seen.has(item.trade.importKey)) continue;
+      if (item.trade.importKey) seen.add(item.trade.importKey);
+      items.push(item);
+    }
+  }
+
   if (!items.length) {
-    throw new Error(
-      'No trade tables recognised in the capture. Open the trade log / journal list view in the platform, then run the bookmarklet again.',
-    );
+    const d = payload.diagnostics;
+    let hint =
+      'No trades recognised in the capture. Open the trade log / journal list view in the platform, then run the bookmarklet again.';
+    if (d) {
+      if (d.flutter || (d.canvases ?? 0) > 0 && (d.tables ?? 0) === 0) {
+        hint =
+          'This platform draws its screen on a canvas, so there is no readable page content — use the recording flow: click the bookmarklet FIRST, then open/refresh the trade log so the data loads, then click the gold badge to finish.';
+      } else if ((d.jsonResponses ?? 0) === 0 && (d.tables ?? 0) === 0) {
+        hint =
+          'The capture contains no tables and no recorded data traffic. Click the bookmarklet BEFORE opening the trade log, browse your trades so they load, then click the gold badge to finish.';
+      } else {
+        hint =
+          'The capture contains data but none of it was recognised as trades. Keep this file — its diagnostics make it possible to tune the extractor for this platform.';
+      }
+    }
+    throw new Error(hint);
   }
   return { items, warnings, sourceUrl: payload.url ?? '' };
 }
