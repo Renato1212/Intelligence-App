@@ -162,31 +162,29 @@ export default function ImportPage() {
             Extract FROM Trader One — Edge Capture <span className="hint">no API, no CSV export needed</span>
           </div>
           <p className="muted small" style={{ marginTop: 0 }}>
-            Trader One has no API and no export, so Edge Capture reads the data <b>off the screen</b>: a bookmarklet
-            you keep in your bookmarks bar runs inside your logged-in Trader One page, reads every trade table it can
-            see (stats, tags, descriptions — plus row images where possible), and downloads an{' '}
-            <span className="mono">edge-capture.json</span> file. Drop that file above and your trades, tags, notes
-            and photos are merged in — already-imported trades are <b>enriched</b>, never duplicated. Everything runs
-            in your own browser; nothing is sent anywhere.
+            Trader One has no API and no export, so Edge Capture takes the data anyway — two ways at once: it{' '}
+            <b>records the data the page itself downloads</b> (works even when the app draws to a canvas and nothing
+            is readable on screen) and it reads any visible trade tables. It produces an{' '}
+            <span className="mono">edge-capture.json</span> file; drop that file above and your trades, stats, tags,
+            notes and photos are merged in — already-imported trades are <b>enriched</b>, never duplicated.
+            Everything runs in your own browser; nothing is sent anywhere.
           </p>
           <ol className="muted small" style={{ margin: '0 0 10px', paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 4 }}>
             <li>
-              <b>Desktop:</b> drag this button to your bookmarks bar → open Trader One's trade log page → click it:{' '}
+              <b>Get the button:</b> on desktop, drag this to your bookmarks bar:{' '}
               <a
                 href={bookmarkletHref()}
                 className="btn sm"
                 style={{ margin: '0 4px' }}
                 onClick={(e) => {
                   e.preventDefault();
-                  toast('Don’t click — drag this button to your bookmarks bar, then use it on the Trader One page');
+                  toast('Don’t click here — drag this button to your bookmarks bar, then use it on the Trader One page');
                 }}
               >
                 ⚡ Edge Capture
-              </a>
-            </li>
-            <li>
-              <b>iPhone / iPad:</b> copy the code, bookmark any page in Safari, then edit that bookmark and paste the
-              code as its address.{' '}
+              </a>{' '}
+              On iPhone / iPad: copy the code, bookmark any page in Safari, then edit that bookmark and paste the code
+              as its address.{' '}
               <button
                 className="btn sm"
                 onClick={() => {
@@ -198,8 +196,14 @@ export default function ImportPage() {
               </button>
             </li>
             <li>
-              Show <b>all</b> the rows you want (expand the date range, scroll the table fully) before running it —
-              it captures what's rendered on screen.
+              <b>Record:</b> log in to Trader One and click the bookmark <b>first</b> — a gold “recording” badge
+              appears. Then open your trade log / journal pages (expand the date range, scroll through everything you
+              want) so the data loads while it records.
+            </li>
+            <li>
+              <b>Finish:</b> click the gold badge — the <span className="mono">edge-capture.json</span> downloads.
+              Drop it on this page. If no trades are recognised, import the file anyway and share it: it embeds
+              diagnostics that let the extractor be tuned for the exact page layout.
             </li>
           </ol>
           <div className="row">
