@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { PnL, SideBadge, useToast } from '../components/ui';
 import type { Trade } from '../domain/types';
 import { bookmarkletCode, bookmarkletHref } from '../lib/bookmarklet';
-import { importCapture, isCapturePayload, parseCapture, type CaptureParseResult } from '../lib/capture';
+import { CaptureError, importCapture, isCapturePayload, parseCapture, type CaptureDiagnostics, type CaptureParseResult } from '../lib/capture';
 import { db } from '../lib/db';
 import { executionsCSV, shareOrDownload } from '../lib/exporters';
 import { addDays, fmtDate, fmtMoney, fmtTime, todayISO } from '../lib/format';
@@ -44,6 +44,7 @@ export default function ImportPage() {
   };
 
   const [capture, setCapture] = useState<CaptureParseResult | null>(null);
+  const [captureDiag, setCaptureDiag] = useState<CaptureDiagnostics | null>(null);
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState('');
 
@@ -51,12 +52,14 @@ export default function ImportPage() {
     setError(null);
     setResult(null);
     setCapture(null);
+    setCaptureDiag(null);
     setFileName(name);
     try {
       if (isCapturePayload(text)) setCapture(parseCapture(text));
       else setResult(importCSV(text));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (e instanceof CaptureError) setCaptureDiag(e.diagnostics);
+      else setError(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -335,6 +338,71 @@ export default function ImportPage() {
           </div>
         )}
 
+        {captureDiag && (
+          <div className="card" style={{ borderColor: 'var(--dom-news)' }}>
+            <div className="spread" style={{ marginBottom: 8 }}>
+              <div className="card-title" style={{ color: 'var(--dom-news)', marginBottom: 0 }}>
+                No trades recognised in {fileName}
+              </div>
+              <button
+                className="btn sm"
+                onClick={() => {
+                  navigator.clipboard.writeText(JSON.stringify(captureDiag, null, 2));
+                  toast('Diagnostics copied — paste them to get this platform supported');
+                }}
+              >
+                Copy diagnostics
+              </button>
+            </div>
+            <p style={{ marginTop: 0 }}>{captureDiag.hint}</p>
+            {captureDiag.raw && (
+              <div className="row" style={{ gap: 16, marginBottom: 10 }}>
+                <Mini label="Rows captured" value={captureDiag.raw.accumulatedRows ?? 0} />
+                <Mini label="Scan passes" value={captureDiag.raw.scans ?? 0} />
+                <Mini label="API responses" value={captureDiag.raw.jsonResponses ?? 0} />
+                <Mini label="Tables" value={captureDiag.raw.tables ?? 0} />
+                <Mini label="Canvases" value={captureDiag.raw.canvases ?? 0} />
+                <Mini label="Iframes" value={captureDiag.raw.iframes ?? 0} />
+              </div>
+            )}
+            {captureDiag.tableSamples.length > 0 && (
+              <div style={{ marginBottom: 10 }}>
+                <div className="small muted" style={{ marginBottom: 4 }}>
+                  Table headers found on the page:
+                </div>
+                {captureDiag.tableSamples.map((t, i) => (
+                  <div key={i} className="mono small" style={{ marginBottom: 4, wordBreak: 'break-word' }}>
+                    [{t.headers.join(', ')}]
+                  </div>
+                ))}
+              </div>
+            )}
+            {captureDiag.jsonKeySamples.length > 0 && (
+              <div style={{ marginBottom: 4 }}>
+                <div className="small muted" style={{ marginBottom: 4 }}>
+                  Field names seen in the platform's own data:
+                </div>
+                {captureDiag.jsonKeySamples.map((keys, i) => (
+                  <div key={i} className="mono small" style={{ marginBottom: 4, wordBreak: 'break-word' }}>
+                    {'{'} {keys.join(', ')} {'}'}
+                  </div>
+                ))}
+              </div>
+            )}
+            {!captureDiag.tableSamples.length && !captureDiag.jsonKeySamples.length && (
+              <p className="muted small" style={{ marginBottom: 0 }}>
+                Nothing was captured at all — most likely the bookmarklet was clicked after the trade data had
+                already loaded. Re-arm it (click the bookmark) <b>before</b> opening the trade log this time.
+              </p>
+            )}
+            <p className="muted small" style={{ marginBottom: 0 }}>
+              Send me the "Copy diagnostics" output (or the full{' '}
+              <span className="mono">edge-capture.json</span> if you can) and I'll map these exact field names so
+              the import works directly next time.
+            </p>
+          </div>
+        )}
+
         {error && (
           <div className="card" style={{ borderColor: 'var(--loss)' }}>
             <div className="card-title" style={{ color: 'var(--loss)' }}>
@@ -415,5 +483,18 @@ export default function ImportPage() {
         )}
       </div>
     </>
+  );
+}
+
+function Mini({ label, value }: { label: string; value: number }) {
+  return (
+    <div>
+      <div className="tile-label" style={{ fontSize: 10.5 }}>
+        {label}
+      </div>
+      <div className="small" style={{ fontWeight: 650 }}>
+        {value}
+      </div>
+    </div>
   );
 }

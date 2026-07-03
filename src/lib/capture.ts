@@ -23,9 +23,9 @@ export interface CapturePayload {
     rows: string[][];
     rowImages?: { row: number; src: string; dataUrl?: string }[];
   }[];
-  /** v2: JSON API responses recorded while the user browsed the platform */
+  /** v2+: JSON API responses recorded while the user browsed the platform */
   requests?: { url: string; body: string }[];
-  /** v2: page structure hints for debugging unsupported layouts */
+  /** v2+: page structure hints for debugging unsupported layouts */
   diagnostics?: {
     tables?: number;
     ariaGrids?: number;
@@ -34,8 +34,32 @@ export interface CapturePayload {
     canvases?: number;
     flutter?: boolean;
     jsonResponses?: number;
+    /** v3: how many scan passes ran while recording (~1 per 800ms) */
+    scans?: number;
+    /** v3: distinct header signatures / total rows accumulated across all scans */
+    accumulatedTables?: number;
+    accumulatedRows?: number;
     textSample?: string;
   };
+}
+
+/** Structured diagnostics shown in the app when a capture yields zero trades. */
+export interface CaptureDiagnostics {
+  hint: string;
+  raw?: CapturePayload['diagnostics'];
+  /** Header row + one sample row for every table found, even ones that didn't parse as trades */
+  tableSamples: { headers: string[]; sampleRow?: string[] }[];
+  /** Flattened field names seen in JSON API responses, even ones rejected as non-trade arrays */
+  jsonKeySamples: string[][];
+}
+
+export class CaptureError extends Error {
+  diagnostics: CaptureDiagnostics;
+  constructor(diagnostics: CaptureDiagnostics) {
+    super(diagnostics.hint);
+    this.name = 'CaptureError';
+    this.diagnostics = diagnostics;
+  }
 }
 
 export interface CaptureItem {
@@ -74,11 +98,14 @@ const JSON_KEYS: Record<string, string[]> = {
   date: ['date', 'tradedate', 'day', 'sessiondate'],
   entryTime: ['entrytime', 'opentime', 'entrydate', 'opened', 'openedat', 'openat', 'entryts', 'entryat', 'starttime', 'open', 'entry'],
   exitTime: ['exittime', 'closetime', 'exitdate', 'closed', 'closedat', 'closeat', 'endtime', 'close', 'exit'],
-  entryPrice: ['entryprice', 'openprice', 'avgentryprice', 'pricein', 'avgopen', 'entryavg'],
-  exitPrice: ['exitprice', 'closeprice', 'avgexitprice', 'priceout', 'avgclose', 'exitavg'],
-  qty: ['qty', 'quantity', 'size', 'contracts', 'volume', 'lots', 'totalsize', 'filledqty'],
-  side: ['side', 'direction', 'position', 'buysell', 'longshort', 'positiontype'],
-  pnl: ['pnl', 'profit', 'profitloss', 'realizedpnl', 'netpnl', 'pl', 'realized', 'netprofit', 'grosspnl'],
+  entryPrice: ['entryprice', 'openprice', 'avgentryprice', 'pricein', 'avgopen', 'entryavg', 'openingprice', 'avgopenprice'],
+  exitPrice: ['exitprice', 'closeprice', 'avgexitprice', 'priceout', 'avgclose', 'exitavg', 'closingprice', 'avgcloseprice'],
+  qty: ['qty', 'quantity', 'size', 'contracts', 'volume', 'lots', 'totalsize', 'filledqty', 'positionsize'],
+  side: ['side', 'direction', 'position', 'buysell', 'longshort', 'positiontype', 'tradeside', 'tradedirection'],
+  pnl: [
+    'pnl', 'profit', 'profitloss', 'realizedpnl', 'netpnl', 'pl', 'realized', 'netprofit', 'grosspnl',
+    'result', 'totalpnl', 'closedpnl', 'tradepnl', 'netamount', 'gainloss',
+  ],
   fees: ['commission', 'commissions', 'fees', 'fee'],
   tags: ['tags', 'labels', 'level3'],
   domain: ['tag', 'domain', 'primarytag', 'edgedomain'],
@@ -300,21 +327,38 @@ export function parseCapture(text: string): CaptureParseResult {
 
   if (!items.length) {
     const d = payload.diagnostics;
-    let hint =
-      'No trades recognised in the capture. Open the trade log / journal list view in the platform, then run the bookmarklet again.';
-    if (d) {
-      if (d.flutter || (d.canvases ?? 0) > 0 && (d.tables ?? 0) === 0) {
-        hint =
-          'This platform draws its screen on a canvas, so there is no readable page content — use the recording flow: click the bookmarklet FIRST, then open/refresh the trade log so the data loads, then click the gold badge to finish.';
-      } else if ((d.jsonResponses ?? 0) === 0 && (d.tables ?? 0) === 0) {
-        hint =
-          'The capture contains no tables and no recorded data traffic. Click the bookmarklet BEFORE opening the trade log, browse your trades so they load, then click the gold badge to finish.';
-      } else {
-        hint =
-          'The capture contains data but none of it was recognised as trades. Keep this file — its diagnostics make it possible to tune the extractor for this platform.';
+    const noTraffic = (d?.jsonResponses ?? 0) === 0 && (d?.accumulatedRows ?? d?.tables ?? 0) === 0;
+    let hint: string;
+    if (noTraffic) {
+      hint =
+        'Nothing was captured at all — no tables and no recorded network traffic. Click the bookmarklet BEFORE opening the trade log (so it can start recording), then browse your trades, then click the gold badge to finish.';
+    } else if ((d?.accumulatedRows ?? 0) === 0 && (d?.jsonResponses ?? 0) > 0) {
+      hint =
+        'Data traffic was recorded but no trade rows were recognised in it. Import this file anyway — the diagnostics below show the actual field names, which is enough to add support for them.';
+    } else {
+      hint =
+        'Rows were captured but none matched the trade shape closely enough. Import this file anyway — the diagnostics below show what was found.';
+    }
+
+    const tableSamples = (payload.tables ?? []).slice(0, 5).map((t) => ({ headers: t.headers, sampleRow: t.rows[0] }));
+    const jsonKeySamples: string[][] = [];
+    for (const req of payload.requests ?? []) {
+      if (jsonKeySamples.length >= 5) break;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(req.body);
+      } catch {
+        continue;
+      }
+      const arrays: Record<string, unknown>[][] = [];
+      collectArrays(parsed, arrays);
+      for (const arr of arrays) {
+        if (jsonKeySamples.length >= 5) break;
+        if (arr[0]) jsonKeySamples.push(Object.keys(flatten(arr[0])));
       }
     }
-    throw new Error(hint);
+
+    throw new CaptureError({ hint, raw: d, tableSamples, jsonKeySamples });
   }
   return { items, warnings, sourceUrl: payload.url ?? '' };
 }
