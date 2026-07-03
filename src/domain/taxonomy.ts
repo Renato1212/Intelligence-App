@@ -413,6 +413,22 @@ export function domainOf(id: string | null | undefined): EdgeDomain | null {
   return DOMAIN_MAP[id as DomainId] ?? null;
 }
 
+/** Match a free-text domain label ("Tech", "News", "Central Banks", "data"...) to a domain id. */
+export function domainFromLabel(label: string | null | undefined): DomainId | null {
+  if (!label) return null;
+  const s = label.trim().toLowerCase();
+  if (!s) return null;
+  for (const d of DOMAINS) {
+    if (s === d.id || s === d.short.toLowerCase() || s === d.name.toLowerCase()) return d.id;
+  }
+  if (s.includes('central') || s === 'cb') return 'central-banks';
+  if (s.includes('data') || s.includes('econ')) return 'economic-data';
+  if (s.includes('news') || s.includes('macro')) return 'news';
+  if (s.includes('tech')) return 'technicals';
+  if (s.includes('flow')) return 'flow';
+  return null;
+}
+
 export function categoryLabel(domainId: string | null | undefined, catId: string | null | undefined): string {
   const d = domainOf(domainId);
   if (!d || !catId) return catId ?? '';

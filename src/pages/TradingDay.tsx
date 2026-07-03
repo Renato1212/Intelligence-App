@@ -1,6 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { DayExportBar } from '../components/DayExportBar';
 import { DebriefEditor } from '../components/DebriefEditor';
 import { PrepEditor } from '../components/PrepEditor';
 import { DomainChip, Modal, PnL, SideBadge } from '../components/ui';
@@ -104,6 +105,8 @@ export default function TradingDay() {
             </div>
           </div>
 
+          <hr className="divider" />
+          <DayExportBar date={date} />
           {(videos.length > 0 || links.length > 0 || photos.length > 0) && (
             <>
               <hr className="divider" />

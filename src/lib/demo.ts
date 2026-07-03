@@ -326,13 +326,13 @@ export async function loadDemoData(): Promise<number> {
 
     if (chance(0.4)) {
       const prep = emptyPrep(date);
-      prep.overnight = {
-        dollarFx: pick(['DXY flat, inside day', 'Dollar bid overnight, +0.3%', 'Euro squeeze on ECB sources story']),
-        gold: pick(['Quiet, holding the range', 'Gold +0.8% — risk-off tone', 'Drifting lower with yields up']),
-        oil: pick(['Crude flat into inventories', 'MCL +1.2% on supply headline', 'Selling off from the bounce']),
-        euStocks: pick(['DAX balanced, low volume', 'EU stocks gap higher with US futures', 'Weak open, holding VWAP']),
-        bunds: pick(['Bunds unchanged', 'Bid with the risk-off move', 'Offered into supply']),
-      };
+      prep.overnightMarkets = [
+        { market: 'Dollar / DXY', note: pick(['DXY flat, inside day', 'Dollar bid overnight, +0.3%', 'Euro squeeze on ECB sources story']) },
+        { market: 'Gold (GC)', note: pick(['Quiet, holding the range', 'Gold +0.8% — risk-off tone', 'Drifting lower with yields up']) },
+        { market: 'Crude Oil (CL)', note: pick(['Crude flat into inventories', 'MCL +1.2% on supply headline', 'Selling off from the bounce']) },
+        ...(chance(0.6) ? [{ market: pick(['S&P 500 (ES)', 'Nasdaq (NQ)', 'DAX (FDAX)']), note: pick(['Balanced overnight, low volume', 'Gap higher with US futures', 'Weak, holding VWAP']) }] : []),
+        ...(chance(0.5) ? [{ market: pick(['10y Notes (ZN)', 'Bunds (FGBL)', 'Yen (6J)']), note: pick(['Unchanged', 'Bid with the risk-off move', 'Offered into supply']) }] : []),
+      ];
       prep.overnightMoved = pick([
         'Gold and bonds both bid — consistent risk-off read across markets.',
         'One-market move only (crude on the headline); others quiet, so not a regime signal.',

@@ -7,12 +7,28 @@ import { useToast } from './ui';
 
 const HYP_COLORS: Record<string, string> = { 'H1 Red': '#e66767', 'H2 Blue': '#3987e5', 'H3 Green': '#0ca30c' };
 
-const OVERNIGHT_MARKETS: { key: keyof DayPrep['overnight']; label: string }[] = [
-  { key: 'dollarFx', label: 'Dollar / FX' },
-  { key: 'gold', label: 'Gold' },
-  { key: 'oil', label: 'Oil' },
-  { key: 'euStocks', label: 'EU Stocks' },
-  { key: 'bunds', label: 'Bunds' },
+/** Common futures markets offered as one-click additions — any custom market can be typed in too. */
+const MARKET_SUGGESTIONS = [
+  'Dollar / DXY',
+  'EUR (6E)',
+  'Yen (6J)',
+  'GBP (6B)',
+  'Gold (GC)',
+  'Silver (SI)',
+  'Copper (HG)',
+  'Crude Oil (CL)',
+  'Nat Gas (NG)',
+  'S&P 500 (ES)',
+  'Nasdaq (NQ)',
+  'Russell (RTY)',
+  'Dow (YM)',
+  'EU Stocks (FESX)',
+  'DAX (FDAX)',
+  'Bunds (FGBL)',
+  '10y Notes (ZN)',
+  '30y Bonds (ZB)',
+  'VIX',
+  'Bitcoin (BTC)',
 ];
 
 /**
@@ -23,6 +39,7 @@ const OVERNIGHT_MARKETS: { key: keyof DayPrep['overnight']; label: string }[] = 
 export function PrepEditor({ date }: { date: string }) {
   const existing = useLiveQuery(() => db.preps.where('date').equals(date).first(), [date]);
   const [draft, setDraft] = useState<DayPrep>(emptyPrep(date));
+  const [customMarket, setCustomMarket] = useState('');
   const toast = useToast();
 
   useEffect(() => {
@@ -64,21 +81,61 @@ export function PrepEditor({ date }: { date: string }) {
 
       <div className="card stack">
         <div className="card-title">
-          Overnights <span className="hint">the session before your market opens — risk-sense, topical and correlated markets</span>
+          Overnights <span className="hint">the session before your market opens — pick the markets you want to analyse today</span>
         </div>
-        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))' }}>
-          {OVERNIGHT_MARKETS.map((m) => (
-            <label key={m.key} className="field">
-              <span>{m.label}</span>
-              <textarea
-                rows={2}
-                value={draft.overnight[m.key]}
-                onChange={(e) => set('overnight', { ...draft.overnight, [m.key]: e.target.value })}
-                placeholder="Move? Read?"
-              />
-            </label>
+        <div className="row" style={{ gap: 6 }}>
+          <span className="small muted">Add market:</span>
+          {MARKET_SUGGESTIONS.filter((m) => !draft.overnightMarkets.some((o) => o.market === m)).map((m) => (
+            <span
+              key={m}
+              className="chip clickable"
+              onClick={() => set('overnightMarkets', [...draft.overnightMarkets, { market: m, note: '' }])}
+            >
+              + {m}
+            </span>
           ))}
+          <input
+            placeholder="Other market ↵"
+            value={customMarket}
+            onChange={(e) => setCustomMarket(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && customMarket.trim()) {
+                set('overnightMarkets', [...draft.overnightMarkets, { market: customMarket.trim(), note: '' }]);
+                setCustomMarket('');
+              }
+            }}
+            style={{ width: 140 }}
+          />
         </div>
+        {draft.overnightMarkets.length > 0 && (
+          <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
+            {draft.overnightMarkets.map((m, i) => (
+              <label key={i} className="field">
+                <span className="spread">
+                  {m.market}
+                  <span
+                    style={{ cursor: 'pointer', color: 'var(--muted)' }}
+                    title="Remove market"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      set('overnightMarkets', draft.overnightMarkets.filter((_, j) => j !== i));
+                    }}
+                  >
+                    ✕
+                  </span>
+                </span>
+                <textarea
+                  rows={2}
+                  value={m.note}
+                  onChange={(e) =>
+                    set('overnightMarkets', draft.overnightMarkets.map((o, j) => (j === i ? { ...o, note: e.target.value } : o)))
+                  }
+                  placeholder="Moved significantly? Read?"
+                />
+              </label>
+            ))}
+          </div>
+        )}
         <div className="grid grid-2">
           <label className="field">
             <span>Have any moved significantly? Same movement across markets, or one alone?</span>

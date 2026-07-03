@@ -171,17 +171,15 @@ ${trades
 }
 
 function prepHtml(prep: DayPrep): string {
-  const on = prep.overnight;
-  const markets: [string, string][] = [
-    ['Dollar/FX', on.dollarFx],
-    ['Gold', on.gold],
-    ['Oil', on.oil],
-    ['EU Stocks', on.euStocks],
-    ['Bunds', on.bunds],
-  ];
+  const markets = prep.overnightMarkets ?? [];
   return `<h2>Preparation</h2>
-<h3>Overnights</h3>
-<table><tr>${markets.map(([m]) => `<th>${m}</th>`).join('')}</tr><tr>${markets.map(([, v]) => `<td>${esc(v || '—')}</td>`).join('')}</tr></table>
+${
+  markets.length
+    ? `<h3>Overnights</h3><table><tr><th>Market</th><th>Read</th></tr>${markets
+        .map((m) => `<tr><td><b>${esc(m.market)}</b></td><td>${esc(m.note || '—')}</td></tr>`)
+        .join('')}</table>`
+    : ''
+}
 ${para('Moved significantly? Same movement or one market alone?', prep.overnightMoved)}
 ${para('Implication for your main markets', prep.overnightImplication)}
 <h3>News</h3>
@@ -210,14 +208,29 @@ ${prep.videoUrl ? `<div class="lbl">Video</div><p><a href="${esc(prep.videoUrl)}
 ${linksHtml(prep.links)}`;
 }
 
-export function dayPackHtml(date: string, prep: DayPrep | undefined, trades: Trade[], debrief: DailyDebrief | undefined, photos: Photo[]): string {
-  return `<h1>Trading day — ${fmtDate(date)}</h1>
+export type DayExportScope = 'all' | 'prep' | 'trades' | 'debrief';
+
+export const SCOPE_TITLES: Record<DayExportScope, string> = {
+  all: 'Trading day',
+  prep: 'Day preparation',
+  trades: 'Trades',
+  debrief: 'Daily debrief',
+};
+
+export function dayPackHtml(
+  date: string,
+  prep: DayPrep | undefined,
+  trades: Trade[],
+  debrief: DailyDebrief | undefined,
+  photos: Photo[],
+  scope: DayExportScope = 'all',
+): string {
+  return `<h1>${SCOPE_TITLES[scope]} — ${fmtDate(date)}</h1>
 <div class="meta">Keep perspective on moves · What is the implication? · Add risk to high value trades</div>
-${prep ? prepHtml(prep) : ''}
-<h2>Trades</h2>
-${dayTradesTableHtml(trades)}
+${(scope === 'all' || scope === 'prep') && prep ? prepHtml(prep) : ''}
+${scope === 'all' || scope === 'trades' ? `<h2>Trades</h2>\n${dayTradesTableHtml(trades)}` : ''}
 ${
-  debrief
+  (scope === 'all' || scope === 'debrief') && debrief
     ? `<h2>Daily debrief</h2>
 ${para('What happened, what you did and how you were feeling', debrief.narrative)}
 ${para('Compared with preparation and hypothesis', debrief.comparison)}
@@ -231,11 +244,20 @@ ${linksHtml(debrief.links)}`
 ${photosHtml(photos)}`;
 }
 
-export function dayPackMarkdown(date: string, prep: DayPrep | undefined, trades: Trade[], debrief: DailyDebrief | undefined): string {
-  let md = `# Trading Day — ${fmtDate(date)}\n\n> Keep perspective on moves · What is the implication? · Add risk to high value trades\n\n`;
-  if (prep) {
-    const on = prep.overnight;
-    md += `## Preparation\n\n### Overnights\n\n| Dollar/FX | Gold | Oil | EU Stocks | Bunds |\n| --- | --- | --- | --- | --- |\n| ${[on.dollarFx, on.gold, on.oil, on.euStocks, on.bunds].map((v) => v || '—').join(' | ')} |\n\n`;
+export function dayPackMarkdown(
+  date: string,
+  prep: DayPrep | undefined,
+  trades: Trade[],
+  debrief: DailyDebrief | undefined,
+  scope: DayExportScope = 'all',
+): string {
+  let md = `# ${SCOPE_TITLES[scope]} — ${fmtDate(date)}\n\n> Keep perspective on moves · What is the implication? · Add risk to high value trades\n\n`;
+  if ((scope === 'all' || scope === 'prep') && prep) {
+    md += `## Preparation\n\n`;
+    const markets = prep.overnightMarkets ?? [];
+    if (markets.length) {
+      md += `### Overnights\n\n| Market | Read |\n| --- | --- |\n${markets.map((m) => `| **${m.market}** | ${m.note || '—'} |`).join('\n')}\n\n`;
+    }
     md += mdSection('Moved significantly? Same movement or one market alone?', prep.overnightMoved);
     md += mdSection('Implication for main markets', prep.overnightImplication);
     md += mdSection('News — priced in', prep.newsPricedIn);
@@ -253,20 +275,22 @@ export function dayPackMarkdown(date: string, prep: DayPrep | undefined, trades:
     }
     md += linksMd(prep.links);
   }
-  md += `## Trades\n\n`;
-  if (trades.length) {
-    md += `| Time | Inst | Side | Qty | Entry → Exit | Domain | Tags | P&L |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n`;
-    md += trades
-      .map(
-        (t) =>
-          `| ${fmtTime(t.entryTime)} | ${t.instrument} | ${t.side} | ${t.qty} | ${t.entryPrice} → ${t.exitPrice} | ${domainOf(t.domain)?.short ?? '—'} | ${t.tags.join(', ')} | ${fmtMoney(t.pnl, { sign: true })} |`,
-      )
-      .join('\n');
-    md += `\n\n**Day total: ${fmtMoney(trades.reduce((s, t) => s + t.pnl, 0), { sign: true })}**\n\n`;
-  } else {
-    md += `No trades recorded this day.\n\n`;
+  if (scope === 'all' || scope === 'trades') {
+    md += `## Trades\n\n`;
+    if (trades.length) {
+      md += `| Time | Inst | Side | Qty | Entry → Exit | Domain | Tags | P&L |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n`;
+      md += trades
+        .map(
+          (t) =>
+            `| ${fmtTime(t.entryTime)} | ${t.instrument} | ${t.side} | ${t.qty} | ${t.entryPrice} → ${t.exitPrice} | ${domainOf(t.domain)?.short ?? '—'} | ${t.tags.join(', ')} | ${fmtMoney(t.pnl, { sign: true })} |`,
+        )
+        .join('\n');
+      md += `\n\n**Day total: ${fmtMoney(trades.reduce((s, t) => s + t.pnl, 0), { sign: true })}**\n\n`;
+    } else {
+      md += `No trades recorded this day.\n\n`;
+    }
   }
-  if (debrief) {
+  if ((scope === 'all' || scope === 'debrief') && debrief) {
     md += `## Daily debrief\n\n`;
     md += mdSection('What happened, what you did and how you were feeling', debrief.narrative);
     md += mdSection('Compared with preparation and hypothesis', debrief.comparison);
