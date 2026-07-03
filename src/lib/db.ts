@@ -26,6 +26,28 @@ class EdgeDB extends Dexie {
       preps: '++id, &date',
       photos: '++id, [parentType+parentId]',
     });
+    // v3: fixed overnight fields (dollarFx/gold/oil/euStocks/bunds) become a
+    // per-day list of chosen markets
+    this.version(3).upgrade(async (tx) => {
+      const LEGACY_LABELS: Record<string, string> = {
+        dollarFx: 'Dollar / FX',
+        gold: 'Gold (GC)',
+        oil: 'Oil (CL)',
+        euStocks: 'EU Stocks (FESX)',
+        bunds: 'Bunds (FGBL)',
+      };
+      await tx
+        .table('preps')
+        .toCollection()
+        .modify((p: DayPrep & { overnight?: Record<string, string> }) => {
+          if (!p.overnightMarkets) {
+            p.overnightMarkets = Object.entries(p.overnight ?? {})
+              .filter(([, note]) => note?.trim())
+              .map(([key, note]) => ({ market: LEGACY_LABELS[key] ?? key, note }));
+          }
+          delete p.overnight;
+        });
+    });
   }
 }
 
@@ -34,7 +56,7 @@ export const db = new EdgeDB();
 export function emptyPrep(date: string): DayPrep {
   return {
     date,
-    overnight: { dollarFx: '', gold: '', oil: '', euStocks: '', bunds: '' },
+    overnightMarkets: [],
     overnightMoved: '',
     overnightImplication: '',
     newsPricedIn: '',

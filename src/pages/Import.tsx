@@ -3,6 +3,8 @@ import { useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PnL, SideBadge, useToast } from '../components/ui';
 import type { Trade } from '../domain/types';
+import { bookmarkletCode, bookmarkletHref } from '../lib/bookmarklet';
+import { importCapture, isCapturePayload, parseCapture, type CaptureParseResult } from '../lib/capture';
 import { db } from '../lib/db';
 import { executionsCSV, shareOrDownload } from '../lib/exporters';
 import { addDays, fmtDate, fmtMoney, fmtTime, todayISO } from '../lib/format';
@@ -41,15 +43,31 @@ export default function ImportPage() {
     );
   };
 
+  const [capture, setCapture] = useState<CaptureParseResult | null>(null);
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [pasteText, setPasteText] = useState('');
+
   const handleText = (text: string, name: string) => {
     setError(null);
     setResult(null);
+    setCapture(null);
     setFileName(name);
     try {
-      setResult(importCSV(text));
+      if (isCapturePayload(text)) setCapture(parseCapture(text));
+      else setResult(importCSV(text));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
+  };
+
+  const confirmCapture = async () => {
+    if (!capture) return;
+    setBusy(true);
+    const res = await importCapture(capture.items);
+    setBusy(false);
+    setCapture(null);
+    toast(`Capture imported — ${res.added} new trades, ${res.enriched} existing trades enriched`);
+    if (res.added || res.enriched) nav('/trades');
   };
 
   const onFile = (f: File | undefined) => {
@@ -109,7 +127,7 @@ export default function ImportPage() {
           <input
             ref={fileRef}
             type="file"
-            accept=".csv,.txt,.tsv"
+            accept=".csv,.txt,.tsv,.json"
             style={{ display: 'none' }}
             onChange={(e) => onFile(e.target.files?.[0])}
           />
@@ -141,7 +159,82 @@ export default function ImportPage() {
 
         <div className="card" style={{ borderLeft: '3px solid var(--gold)' }}>
           <div className="card-title">
-            Mirror executions to Trader One (Axia) <span className="hint">works on iPhone / iPad via the native share sheet</span>
+            Extract FROM Trader One — Edge Capture <span className="hint">no API, no CSV export needed</span>
+          </div>
+          <p className="muted small" style={{ marginTop: 0 }}>
+            Trader One has no API and no export, so Edge Capture reads the data <b>off the screen</b>: a bookmarklet
+            you keep in your bookmarks bar runs inside your logged-in Trader One page, reads every trade table it can
+            see (stats, tags, descriptions — plus row images where possible), and downloads an{' '}
+            <span className="mono">edge-capture.json</span> file. Drop that file above and your trades, tags, notes
+            and photos are merged in — already-imported trades are <b>enriched</b>, never duplicated. Everything runs
+            in your own browser; nothing is sent anywhere.
+          </p>
+          <ol className="muted small" style={{ margin: '0 0 10px', paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <li>
+              <b>Desktop:</b> drag this button to your bookmarks bar → open Trader One's trade log page → click it:{' '}
+              <a
+                href={bookmarkletHref()}
+                className="btn sm"
+                style={{ margin: '0 4px' }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  toast('Don’t click — drag this button to your bookmarks bar, then use it on the Trader One page');
+                }}
+              >
+                ⚡ Edge Capture
+              </a>
+            </li>
+            <li>
+              <b>iPhone / iPad:</b> copy the code, bookmark any page in Safari, then edit that bookmark and paste the
+              code as its address.{' '}
+              <button
+                className="btn sm"
+                onClick={() => {
+                  navigator.clipboard.writeText(bookmarkletCode());
+                  toast('Bookmarklet code copied');
+                }}
+              >
+                Copy bookmarklet code
+              </button>
+            </li>
+            <li>
+              Show <b>all</b> the rows you want (expand the date range, scroll the table fully) before running it —
+              it captures what's rendered on screen.
+            </li>
+          </ol>
+          <div className="row">
+            <button className="btn sm" onClick={() => setPasteOpen(!pasteOpen)}>
+              {pasteOpen ? 'Hide paste box' : 'Paste capture JSON instead…'}
+            </button>
+          </div>
+          {pasteOpen && (
+            <div className="stack" style={{ marginTop: 10, gap: 8 }}>
+              <textarea
+                rows={4}
+                placeholder='Paste the capture JSON here (it starts with {"source":"edge-capture"...)'
+                value={pasteText}
+                onChange={(e) => setPasteText(e.target.value)}
+              />
+              <div>
+                <button
+                  className="btn primary sm"
+                  disabled={!pasteText.trim()}
+                  onClick={() => {
+                    handleText(pasteText, 'pasted capture');
+                    setPasteText('');
+                    setPasteOpen(false);
+                  }}
+                >
+                  Parse capture
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="card">
+          <div className="card-title">
+            Mirror executions TO Trader One (Axia) <span className="hint">works on iPhone / iPad via the native share sheet</span>
           </div>
           <p className="muted small" style={{ marginTop: 0 }}>
             Trader One has no public API, so a live push isn't possible — this is the reliable bridge: import your
@@ -169,6 +262,74 @@ export default function ImportPage() {
             <b>Share → Add to Home Screen</b> to run it like a native app on your iPhone or iPad.
           </p>
         </div>
+
+        {capture && (
+          <div className="card">
+            <div className="spread" style={{ marginBottom: 12 }}>
+              <div>
+                <h3 style={{ fontSize: 15 }}>
+                  {capture.items.length} trades captured{capture.sourceUrl ? ` from ${new URL(capture.sourceUrl).hostname}` : ''}
+                </h3>
+                <div className="muted small">
+                  {capture.items.filter((i) => i.trade.tags.length || i.trade.description).length} carry tags/notes ·{' '}
+                  {capture.items.reduce((s, i) => s + i.images.length, 0)} photos · net{' '}
+                  <PnL value={capture.items.reduce((s, i) => s + i.trade.pnl, 0)} />
+                </div>
+              </div>
+              <div className="row">
+                <button className="btn" onClick={() => setCapture(null)}>
+                  Cancel
+                </button>
+                <button className="btn primary" disabled={busy} onClick={confirmCapture}>
+                  {busy ? 'Importing…' : `Import ${capture.items.length} trades`}
+                </button>
+              </div>
+            </div>
+            {capture.warnings.length > 0 && (
+              <div className="small" style={{ color: 'var(--dom-news)', marginBottom: 10 }}>
+                {capture.warnings.slice(0, 5).map((w, i) => (
+                  <div key={i}>⚠ {w}</div>
+                ))}
+              </div>
+            )}
+            <div className="table-wrap" style={{ maxHeight: 320, overflowY: 'auto' }}>
+              <table className="data">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Inst</th>
+                    <th>Side</th>
+                    <th className="num">Qty</th>
+                    <th className="num">P&L</th>
+                    <th>Tags</th>
+                    <th>Notes</th>
+                    <th className="num">Photos</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {capture.items.slice(0, 100).map((item, i) => (
+                    <tr key={i}>
+                      <td>{fmtDate(item.trade.date)}</td>
+                      <td className="mono">{item.trade.instrument}</td>
+                      <td>
+                        <SideBadge side={item.trade.side} />
+                      </td>
+                      <td className="num">{item.trade.qty}</td>
+                      <td className="num">
+                        <PnL value={item.trade.pnl} />
+                      </td>
+                      <td className="muted small">{item.trade.tags.slice(0, 3).join(' · ')}</td>
+                      <td className="muted small" style={{ maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {item.trade.description}
+                      </td>
+                      <td className="num">{item.images.length || ''}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         {error && (
           <div className="card" style={{ borderColor: 'var(--loss)' }}>

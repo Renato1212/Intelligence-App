@@ -16,7 +16,7 @@ export type CriterionId =
   | 'articulation'
   | 'review';
 
-export type TradeSource = 'manual' | 'motivewave' | 'rithmic' | 'csv' | 'demo';
+export type TradeSource = 'manual' | 'motivewave' | 'rithmic' | 'csv' | 'demo' | 'capture';
 
 export interface LinkItem {
   label: string;
@@ -93,18 +93,18 @@ export interface Hypothesis {
   expectation: string;
 }
 
+export interface OvernightMarket {
+  /** e.g. "Gold (GC)", "Dollar / DXY", "DAX (FDAX)" */
+  market: string;
+  note: string;
+}
+
 /** Pre-trading-day preparation, following the AXIA day preparation template. */
 export interface DayPrep {
   id?: number;
   date: string;
-  /** Overnight read per risk-sense market */
-  overnight: {
-    dollarFx: string;
-    gold: string;
-    oil: string;
-    euStocks: string;
-    bunds: string;
-  };
+  /** Overnight read per market — chosen per day, any futures market can be added */
+  overnightMarkets: OvernightMarket[];
   /** Moved significantly? Same movement or one market alone? */
   overnightMoved: string;
   /** Implication for your main markets */

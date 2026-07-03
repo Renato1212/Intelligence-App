@@ -1,4 +1,5 @@
 import type { Side, Trade, TradeSource } from '../domain/types';
+import { domainFromLabel } from '../domain/taxonomy';
 import { headerKey, parseCSV, toISODateTime, toNumber } from './csv';
 import { pointValue, symbolRoot } from './contracts';
 
@@ -6,6 +7,8 @@ export interface ImportResult {
   trades: Trade[];
   format: 'trade-log' | 'fills';
   warnings: string[];
+  /** For trade-log parses: index of the source data row each trade came from (aligned with `trades`). */
+  sourceRows: number[];
 }
 
 /** Find the index of the first header matching any alias (by normalized key). */
@@ -25,16 +28,26 @@ function findCol(headers: string[], aliases: string[]): number {
 }
 
 const COLS = {
-  symbol: ['symbol', 'instrument', 'contract', 'market', 'ticker', 'security'],
-  entryTime: ['entry date', 'entry time', 'entry date/time', 'open time', 'opened', 'entrydt', 'date/time', 'entry'],
-  exitTime: ['exit date', 'exit time', 'exit date/time', 'close time', 'closed', 'exitdt', 'exit'],
-  entryPrice: ['entry price', 'open price', 'avg entry price', 'price in', 'buy price'],
-  exitPrice: ['exit price', 'close price', 'avg exit price', 'price out', 'sell price'],
+  symbol: ['symbol', 'instrument', 'contract', 'market', 'ticker', 'security', 'inst'],
+  /** Trade date when the export splits date and times into separate columns (Trader One style) */
+  date: ['date', 'trade date', 'day'],
+  entryTime: ['entry date', 'entry time', 'entry date/time', 'open time', 'opened', 'entrydt', 'date/time', 'open', 'entry'],
+  exitTime: ['exit date', 'exit time', 'exit date/time', 'close time', 'closed', 'exitdt', 'close', 'exit'],
+  entryPrice: ['entry price', 'open price', 'avg entry price', 'price in', 'buy price', 'entry'],
+  exitPrice: ['exit price', 'close price', 'avg exit price', 'price out', 'sell price', 'exit'],
   qty: ['quantity', 'qty', 'size', 'contracts', 'volume', 'filled qty', 'total size', 'lots', 'position'],
   side: ['side', 'direction', 'position', 'long/short', 'buy/sell', 'b/s', 'type', 'action'],
   pnl: ['realized p/l', 'realized pl', 'p/l', 'pl', 'pnl', 'profit', 'profit/loss', 'net p/l', 'net pnl', 'realized profit'],
   fees: ['commission', 'commissions', 'fees', 'fee', 'costs'],
   account: ['account', 'account id', 'acct'],
+  // journal columns (Trader One captures, journal exports)
+  domainTag: ['tag', 'domain', 'primary tag', 'edge domain'],
+  category: ['sub tag', 'subtag', 'category', 'sub-tag'],
+  tags: ['tags', 'labels', 'level 3', 'refinements'],
+  description: ['description', 'notes', 'note', 'comment', 'comments'],
+  learned: ['learned', 'lesson', 'what did you learn'],
+  applyNext: ['apply', 'how to apply', 'application'],
+  video: ['video', 'video url', 'recording'],
   // fill-mode columns
   fillTime: ['update time', 'fill time', 'time', 'timestamp', 'transact time', 'date/time', 'created time', 'time of update'],
   fillPrice: ['avg fill price', 'fill price', 'price', 'avg price', 'trade price'],
@@ -74,9 +87,16 @@ export function makeImportKey(t: Pick<Trade, 'instrument' | 'entryTime' | 'exitT
 }
 
 /** Rows that are completed round-trips (MotiveWave trade log, generic journal exports). */
-function parseTradeLog(headers: string[], rows: string[][], source: TradeSource, warnings: string[]): Trade[] {
+function parseTradeLog(
+  headers: string[],
+  rows: string[][],
+  source: TradeSource,
+  warnings: string[],
+  sourceRows: number[] = [],
+): Trade[] {
   const ci = {
     symbol: findCol(headers, COLS.symbol),
+    date: findCol(headers, COLS.date),
     entryTime: findCol(headers, COLS.entryTime),
     exitTime: findCol(headers, COLS.exitTime),
     entryPrice: findCol(headers, COLS.entryPrice),
@@ -86,14 +106,29 @@ function parseTradeLog(headers: string[], rows: string[][], source: TradeSource,
     pnl: findCol(headers, COLS.pnl),
     fees: findCol(headers, COLS.fees),
     account: findCol(headers, COLS.account),
+    domainTag: findCol(headers, COLS.domainTag),
+    category: findCol(headers, COLS.category),
+    tags: findCol(headers, COLS.tags),
+    description: findCol(headers, COLS.description),
+    learned: findCol(headers, COLS.learned),
+    applyNext: findCol(headers, COLS.applyNext),
+    video: findCol(headers, COLS.video),
   };
   const trades: Trade[] = [];
-  for (const row of rows) {
+  for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
+    const row = rows[rowIdx];
     const get = (i: number) => (i >= 0 ? row[i] : undefined);
     const symbol = (get(ci.symbol) ?? '').trim();
     if (!symbol) continue;
-    const entryTime = toISODateTime(get(ci.entryTime));
-    const exitTime = toISODateTime(get(ci.exitTime)) ?? entryTime;
+    // Trader One-style exports split the trade date from time-only open/close columns
+    const dateRaw = (get(ci.date) ?? '').trim();
+    const when = (cell: string | undefined): string | null => {
+      const c = (cell ?? '').trim();
+      if (dateRaw && /^\d{1,2}:\d{2}(:\d{2})?$/.test(c)) return toISODateTime(`${dateRaw} ${c}`);
+      return toISODateTime(c) ?? (dateRaw ? toISODateTime(dateRaw) : null);
+    };
+    const entryTime = when(get(ci.entryTime));
+    const exitTime = when(get(ci.exitTime)) ?? entryTime;
     if (!entryTime) {
       warnings.push(`Skipped row with unparseable entry time: "${get(ci.entryTime) ?? ''}"`);
       continue;
@@ -125,8 +160,18 @@ function parseTradeLog(headers: string[], rows: string[][], source: TradeSource,
       account: (get(ci.account) ?? '').trim(),
       ...blankTradeFields(),
     };
+    // journal columns, when the export carries them (Trader One captures etc.)
+    t.domain = domainFromLabel(get(ci.domainTag));
+    t.category = (get(ci.category) ?? '').trim().toLowerCase() || null;
+    const rawTags = (get(ci.tags) ?? '').trim();
+    if (rawTags) t.tags = rawTags.split(/[;,·|]/).map((x) => x.trim()).filter(Boolean);
+    t.description = (get(ci.description) ?? '').trim();
+    t.learned = (get(ci.learned) ?? '').trim();
+    t.applyNext = (get(ci.applyNext) ?? '').trim();
+    t.videoUrl = (get(ci.video) ?? '').trim();
     t.importKey = makeImportKey(t);
     trades.push(t);
+    sourceRows.push(rowIdx);
   }
   return trades;
 }
@@ -247,12 +292,13 @@ export function importCSV(text: string): ImportResult {
 
   if (hasExit || hasPnl) {
     const source: TradeSource = headers.some((h) => headerKey(h).includes('motivewave')) ? 'motivewave' : 'csv';
-    const trades = parseTradeLog(headers, dataRows, source, warnings);
+    const sourceRows: number[] = [];
+    const trades = parseTradeLog(headers, dataRows, source, warnings, sourceRows);
     if (!trades.length) throw new Error('No trades could be parsed — check the file format');
-    return { trades, format: 'trade-log', warnings };
+    return { trades, format: 'trade-log', warnings, sourceRows };
   }
 
   const trades = parseFills(headers, dataRows, warnings);
   if (!trades.length) throw new Error('No completed round-trip trades found in fills — check the file format');
-  return { trades, format: 'fills', warnings };
+  return { trades, format: 'fills', warnings, sourceRows: [] };
 }
