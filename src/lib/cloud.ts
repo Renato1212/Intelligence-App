@@ -321,10 +321,28 @@ export function currentUser(): User | null {
   return session?.user ?? null;
 }
 
-export async function signUp(email: string, password: string): Promise<{ needsConfirmation: boolean }> {
+export type SignUpResult = { status: 'signed-in' } | { status: 'needs-confirmation' } | { status: 'already-registered' };
+
+export async function signUp(email: string, password: string): Promise<SignUpResult> {
   const { data, error } = await supabase.auth.signUp({ email, password });
-  if (error) throw new Error(error.message);
-  return { needsConfirmation: !data.session };
+  if (error) {
+    // Supabase surfaces some duplicate-email cases as an error
+    if (/already|registered|exists/i.test(error.message)) return { status: 'already-registered' };
+    throw new Error(error.message);
+  }
+  // Supabase hides "email already taken" behind an obfuscated response with a
+  // user object but no identities and no session — detect it so we don't tell
+  // the trader to check an email that will never arrive.
+  const identities = (data.user as { identities?: unknown[] } | null)?.identities;
+  if (data.user && Array.isArray(identities) && identities.length === 0) {
+    return { status: 'already-registered' };
+  }
+  if (data.session) return { status: 'signed-in' };
+  // No session yet: with server-side auto-confirm, an immediate sign-in
+  // succeeds — try it so the trader never has to touch email.
+  const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+  if (!signInError) return { status: 'signed-in' };
+  return { status: 'needs-confirmation' };
 }
 
 export async function signIn(email: string, password: string): Promise<void> {
