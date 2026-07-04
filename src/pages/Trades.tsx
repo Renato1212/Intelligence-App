@@ -109,6 +109,10 @@ export default function Trades() {
           <p className="page-sub">
             {filtered.length} trades · net <PnL value={stats.netPnl} /> · win rate {fmtPct(stats.winRate)} ·
             expectancy {fmtMoney(stats.expectancy, { sign: true })}
+            {(() => {
+              const withFills = filtered.filter((t) => (t.executions?.length ?? 0) > 0).length;
+              return withFills > 0 ? ` · ${withFills} with execution detail` : '';
+            })()}
           </p>
         </div>
         <button
@@ -175,6 +179,7 @@ export default function Trades() {
               <th>Tags</th>
               <th className="num">R</th>
               {header('P&L', 'pnl', true)}
+              <th className="num">Fills</th>
               <th>Reviewed</th>
             </tr>
           </thead>
@@ -211,6 +216,15 @@ function TradeRow({ t, onClick }: { t: Trade; onClick: () => void }) {
       <td className="num">{fmtR(r)}</td>
       <td className="num">
         <PnL value={t.pnl} />
+      </td>
+      <td className="num">
+        {(t.executions?.length ?? 0) > 0 ? (
+          <span style={{ color: 'var(--gold-strong)' }} title="Has per-fill execution detail (scale-ins/outs)">
+            {t.executions!.length}
+          </span>
+        ) : (
+          <span className="muted">—</span>
+        )}
       </td>
       <td>{reviewed ? <span style={{ color: 'var(--gold)' }}>●</span> : <span className="muted">○</span>}</td>
     </tr>

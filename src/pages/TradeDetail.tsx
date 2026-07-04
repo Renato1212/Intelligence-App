@@ -266,7 +266,20 @@ export default function TradeDetail() {
           </div>
         </div>
 
-        {(draft.executions?.length ?? 0) > 0 && <ExecutionLadder trade={draft} />}
+        {(draft.executions?.length ?? 0) > 0 ? (
+          <ExecutionLadder trade={draft} />
+        ) : (
+          <div className="card">
+            <div className="card-title">Executions — how the position was built</div>
+            <p className="muted small" style={{ margin: 0 }}>
+              No per-fill detail was captured for this trade — only the averaged entry (
+              {Number(draft.entryPrice.toFixed(6))}) and exit ({Number(draft.exitPrice.toFixed(6))}). To see every
+              scale-in/scale-out with its exact size, price, time and order type, re-run Edge Capture on Trader One
+              with the <b>Order History / executions view open</b> and re-import — the fills will be matched to this
+              trade automatically.
+            </p>
+          </div>
+        )}
 
         <div className="card">
           <div className="card-title">
