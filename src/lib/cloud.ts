@@ -21,6 +21,37 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 type TableName = 'trades' | 'debriefs' | 'preps' | 'strategies' | 'photos';
 const TABLES: TableName[] = ['strategies', 'trades', 'debriefs', 'preps', 'photos'];
 const LAST_USER_KEY = 'ei-last-user';
+const LOCAL_ONLY_KEY = 'ei-local-only';
+
+/* ---------- auth readiness (for the login gate) ---------- */
+
+let authReady = false;
+const authListeners = new Set<() => void>();
+
+export function isAuthReady(): boolean {
+  return authReady;
+}
+
+/** Fires whenever the signed-in user or local-only preference changes. */
+export function onAuthChange(fn: () => void): () => void {
+  authListeners.add(fn);
+  return () => authListeners.delete(fn);
+}
+
+function notifyAuth(): void {
+  for (const fn of authListeners) fn();
+}
+
+/** Whether the trader chose to use the app on this device without an account. */
+export function isLocalOnly(): boolean {
+  return localStorage.getItem(LOCAL_ONLY_KEY) === '1';
+}
+
+export function setLocalOnly(v: boolean): void {
+  if (v) localStorage.setItem(LOCAL_ONLY_KEY, '1');
+  else localStorage.removeItem(LOCAL_ONLY_KEY);
+  notifyAuth();
+}
 
 export type SyncState = { status: 'off' | 'syncing' | 'idle' | 'error'; detail?: string; lastSync?: string };
 
@@ -99,7 +130,10 @@ async function buildRecords(table: TableName): Promise<PushRecord[]> {
     };
   }
 
-  return rows.map((r) => {
+  // demo/sample data is throwaway and must never reach a real cloud profile
+  const source = rows.filter((r) => (table === 'trades' ? (r as { source?: string }).source !== 'demo' : true));
+
+  return source.map((r) => {
     const payload: Record<string, unknown> = { ...r };
     if (strategyUidById) {
       const sid = (r as { strategyId?: number | null }).strategyId;
@@ -149,15 +183,30 @@ async function fetchRemote(table: TableName): Promise<Record<string, unknown>[]>
   for (let from = 0; ; from += page) {
     const { data, error } = await supabase
       .from('ei_records')
-      .select('uid, payload')
+      .select('uid, payload, updated_at')
       .eq('table_name', table)
-      .order('uid')
+      .order('updated_at', { ascending: true })
       .range(from, from + page - 1);
     if (error) throw new Error(error.message);
-    for (const row of data ?? []) out.push({ ...(row.payload as Record<string, unknown>), uid: row.uid });
+    for (const row of data ?? []) out.push({ ...(row.payload as Record<string, unknown>), uid: row.uid, __updatedAt: row.updated_at });
     if (!data || data.length < page) break;
   }
   return out;
+}
+
+/**
+ * debriefs and preps have a UNIQUE(date) index locally, but two devices can
+ * each create a record for the same date offline. Keep the most recently
+ * updated per date so the rebuild never hits a constraint error.
+ */
+function dedupeByDate(rows: Record<string, unknown>[]): Record<string, unknown>[] {
+  const byDate = new Map<string, Record<string, unknown>>();
+  for (const r of rows) {
+    const date = String(r.date ?? '');
+    const existing = byDate.get(date);
+    if (!existing || String(r.__updatedAt ?? '') >= String(existing.__updatedAt ?? '')) byDate.set(date, r);
+  }
+  return [...byDate.values()];
 }
 
 /**
@@ -193,10 +242,12 @@ export async function fullSync(): Promise<void> {
     const remote: Record<TableName, Record<string, unknown>[]> = {
       strategies: await fetchRemote('strategies'),
       trades: await fetchRemote('trades'),
-      debriefs: await fetchRemote('debriefs'),
-      preps: await fetchRemote('preps'),
+      debriefs: dedupeByDate(await fetchRemote('debriefs')),
+      preps: dedupeByDate(await fetchRemote('preps')),
       photos: await fetchRemote('photos'),
     };
+    // strip the transient sort field before anything is written to Dexie
+    for (const t of TABLES) for (const r of remote[t]) delete r.__updatedAt;
 
     applyingRemote = true;
     try {
@@ -253,9 +304,9 @@ export async function fullSync(): Promise<void> {
     } finally {
       applyingRemote = false;
     }
-    // ids changed locally — remote payloads still hold old ids; push the
-    // re-mapped state so payload ids converge with this device
-    for (const t of TABLES) await pushTable(t);
+    // remote is authoritative and already carries stable uids + uid-based
+    // cross-references, so the freshly rebuilt local state mirrors it — no
+    // re-push needed (cross-device links resolve by uid, not local id).
     dirtyTables.clear();
     setState({ status: 'idle', lastSync: new Date().toISOString() });
   } catch (e) {
@@ -287,6 +338,7 @@ export async function signOut(): Promise<void> {
 
 async function onSignedIn(s: Session): Promise<void> {
   session = s;
+  localStorage.removeItem(LOCAL_ONLY_KEY); // signing in supersedes local-only mode
   // demo/sample data is throwaway exploration data and must never merge
   // into a real cloud account — strip it before anything gets pushed
   applyingRemote = true;
@@ -342,16 +394,30 @@ function registerHooks(): void {
 /** Call once at app boot. */
 export function initCloud(): void {
   registerHooks();
+  const markReady = () => {
+    if (!authReady) {
+      authReady = true;
+      notifyAuth();
+    }
+  };
   supabase.auth.onAuthStateChange((event, s) => {
     if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') && s) {
       const first = !session;
       session = s;
       if (first && (event === 'SIGNED_IN' || event === 'INITIAL_SESSION')) void onSignedIn(s);
+      notifyAuth();
     } else if (event === 'SIGNED_OUT') {
       session = null;
       setState({ status: 'off' });
+      notifyAuth();
+    } else if (event === 'INITIAL_SESSION') {
+      notifyAuth();
     }
+    markReady();
   });
+  // Fallback: if the auth backend is unreachable (offline / blocked), don't
+  // leave the app stuck on a splash — resolve as "no session" after 2.5s.
+  setTimeout(markReady, 2500);
 }
 
 /* ---------- media storage ---------- */

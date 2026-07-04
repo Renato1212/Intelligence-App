@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Route, Routes } from 'react-router-dom';
+import { AuthGate } from './components/AuthGate';
 import { ToastProvider } from './components/ui';
-import { currentUser, onSyncState, supabase, type SyncState } from './lib/cloud';
+import { currentUser, isLocalOnly, onSyncState, supabase, type SyncState } from './lib/cloud';
 import Dashboard from './pages/Dashboard';
 import Trades from './pages/Trades';
 import TradeDetail from './pages/TradeDetail';
@@ -62,10 +63,11 @@ function AccountStatus() {
   const dotColor =
     sync.status === 'idle' ? 'var(--profit)' : sync.status === 'syncing' ? 'var(--gold)' : sync.status === 'error' ? 'var(--loss)' : 'var(--muted)';
 
+  const label = email ?? (isLocalOnly() ? 'Local only — sign in' : 'Sign in');
   return (
     <NavLink to="/account" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} style={{ marginTop: 4 }}>
       <Icon d={I.account} />
-      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{email ?? 'Sign in'}</span>
+      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
       {email && <span className="grade-dot" style={{ background: dotColor, flexShrink: 0 }} title={sync.status} />}
     </NavLink>
   );
@@ -74,6 +76,16 @@ function AccountStatus() {
 export default function App() {
   return (
     <ToastProvider>
+      <AuthGate>
+        <Shell />
+      </AuthGate>
+    </ToastProvider>
+  );
+}
+
+function Shell() {
+  return (
+    <>
       <div className="shell">
         <aside className="sidebar">
           <div className="brand">
@@ -117,6 +129,6 @@ export default function App() {
           </Routes>
         </main>
       </div>
-    </ToastProvider>
+    </>
   );
 }
