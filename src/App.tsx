@@ -1,5 +1,7 @@
+import { useEffect, useState } from 'react';
 import { NavLink, Route, Routes } from 'react-router-dom';
 import { ToastProvider } from './components/ui';
+import { currentUser, onSyncState, supabase, type SyncState } from './lib/cloud';
 import Dashboard from './pages/Dashboard';
 import Trades from './pages/Trades';
 import TradeDetail from './pages/TradeDetail';
@@ -9,6 +11,8 @@ import Analytics from './pages/Analytics';
 import Playbook from './pages/Playbook';
 import Strategies from './pages/Strategies';
 import ImportPage from './pages/Import';
+import AICoach from './pages/AICoach';
+import Account from './pages/Account';
 import Settings from './pages/Settings';
 
 const I = {
@@ -21,6 +25,8 @@ const I = {
   strategies: <path d="M12 2v4M12 18v4M2 12h4M18 12h4M12 8a4 4 0 100 8 4 4 0 000-8z" />,
   import: <path d="M12 3v12M7 10l5 5 5-5M4 21h16" />,
   settings: <path d="M12 9a3 3 0 100 6 3 3 0 000-6zM19 12a7 7 0 01-.1 1.2l2 1.6-2 3.4-2.4-1a7 7 0 01-2 1.2L14 21h-4l-.5-2.6a7 7 0 01-2-1.2l-2.4 1-2-3.4 2-1.6A7 7 0 015 12a7 7 0 01.1-1.2l-2-1.6 2-3.4 2.4 1a7 7 0 012-1.2L10 3h4l.5 2.6a7 7 0 012 1.2l2.4-1 2 3.4-2 1.6a7 7 0 01.1 1.2z" />,
+  ai: <path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8M12 8a4 4 0 100 8 4 4 0 000-8z" />,
+  account: <path d="M12 12a4 4 0 100-8 4 4 0 000 8zM4 21c0-4.4 3.6-8 8-8s8 3.6 8 8" />,
 };
 
 function Icon({ d }: { d: React.ReactNode }) {
@@ -36,6 +42,31 @@ function Nav({ to, icon, label, end }: { to: string; icon: React.ReactNode; labe
     <NavLink to={to} end={end} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
       <Icon d={icon} />
       {label}
+    </NavLink>
+  );
+}
+
+function AccountStatus() {
+  const [email, setEmail] = useState(currentUser()?.email ?? null);
+  const [sync, setSync] = useState<SyncState>({ status: 'off' });
+
+  useEffect(() => {
+    const { data } = supabase.auth.onAuthStateChange(() => setEmail(currentUser()?.email ?? null));
+    const unsub = onSyncState(setSync);
+    return () => {
+      data.subscription.unsubscribe();
+      unsub();
+    };
+  }, []);
+
+  const dotColor =
+    sync.status === 'idle' ? 'var(--profit)' : sync.status === 'syncing' ? 'var(--gold)' : sync.status === 'error' ? 'var(--loss)' : 'var(--muted)';
+
+  return (
+    <NavLink to="/account" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} style={{ marginTop: 4 }}>
+      <Icon d={I.account} />
+      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{email ?? 'Sign in'}</span>
+      {email && <span className="grade-dot" style={{ background: dotColor, flexShrink: 0 }} title={sync.status} />}
     </NavLink>
   );
 }
@@ -62,9 +93,12 @@ export default function App() {
           <div className="nav-section">Development</div>
           <Nav to="/playbook" icon={I.playbook} label="Playbook" />
           <Nav to="/strategies" icon={I.strategies} label="Strategy Lab" />
+          <Nav to="/ai-coach" icon={I.ai} label="AI Coach" />
           <div className="nav-section">Data</div>
           <Nav to="/import" icon={I.import} label="Import" />
           <Nav to="/settings" icon={I.settings} label="Settings" />
+          <span style={{ flex: 1 }} />
+          <AccountStatus />
         </aside>
         <main className="main">
           <Routes>
@@ -76,8 +110,10 @@ export default function App() {
             <Route path="/analytics" element={<Analytics />} />
             <Route path="/playbook" element={<Playbook />} />
             <Route path="/strategies" element={<Strategies />} />
+            <Route path="/ai-coach" element={<AICoach />} />
             <Route path="/import" element={<ImportPage />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/account" element={<Account />} />
           </Routes>
         </main>
       </div>

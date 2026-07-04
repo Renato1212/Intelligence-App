@@ -37,6 +37,8 @@ export interface Execution {
 
 export interface Trade {
   id?: number;
+  /** Stable cross-device identity for cloud sync */
+  uid?: string;
   /** Trading day, YYYY-MM-DD */
   date: string;
   instrument: string;
@@ -77,6 +79,8 @@ export interface Trade {
 
 export interface DailyDebrief {
   id?: number;
+  /** Stable cross-device identity for cloud sync */
+  uid?: string;
   date: string;
   /** What happened, what you did, how you felt */
   narrative: string;
@@ -116,6 +120,8 @@ export interface OvernightMarket {
 /** Pre-trading-day preparation, following the AXIA day preparation template. */
 export interface DayPrep {
   id?: number;
+  /** Stable cross-device identity for cloud sync */
+  uid?: string;
   date: string;
   /** Overnight read per market — chosen per day, any futures market can be added */
   overnightMarkets: OvernightMarket[];
@@ -144,6 +150,8 @@ export interface DayPrep {
 /** Image attachment stored locally (IndexedDB), linked to a parent record. */
 export interface Photo {
   id?: number;
+  /** Stable cross-device identity for cloud sync */
+  uid?: string;
   parentType: 'trade' | 'debrief' | 'prep';
   parentId: number;
   name: string;
@@ -155,6 +163,8 @@ export type StrategyStatus = 'incubating' | 'testing' | 'active' | 'retired';
 
 export interface Strategy {
   id?: number;
+  /** Stable cross-device identity for cloud sync */
+  uid?: string;
   name: string;
   domain: DomainId | null;
   category: string | null;

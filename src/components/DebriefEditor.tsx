@@ -4,7 +4,7 @@ import type { DailyDebrief } from '../domain/types';
 import { db } from '../lib/db';
 import { dayPackHtml, dayPackMarkdown, downloadFile, openPrintView } from '../lib/exporters';
 import { fmtDate } from '../lib/format';
-import { MediaEditor } from './media';
+import { MediaEditor, VideoField } from './media';
 import { useToast } from './ui';
 
 function emptyDebrief(date: string): DailyDebrief {
@@ -95,10 +95,7 @@ export function DebriefEditor({ date }: { date: string }) {
         <span>Is there something you can do to apply what you learned?</span>
         <textarea rows={3} value={draft.applyNext} onChange={(e) => set('applyNext', e.target.value)} />
       </label>
-      <label className="field">
-        <span>Recording of the trading day (video link)</span>
-        <input value={draft.videoUrl ?? ''} onChange={(e) => set('videoUrl', e.target.value)} placeholder="https://…" />
-      </label>
+      <VideoField label="Recording of the trading day" value={draft.videoUrl ?? ''} onChange={(v) => set('videoUrl', v)} />
       <MediaEditor
         parentType="debrief"
         parentId={draft.id ?? null}

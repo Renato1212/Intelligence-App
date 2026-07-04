@@ -1,13 +1,11 @@
-import { useLiveQuery } from 'dexie-react-hooks';
-import { useMemo, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PnL, SideBadge, useToast } from '../components/ui';
 import type { Trade } from '../domain/types';
 import { bookmarkletCode, bookmarkletHref } from '../lib/bookmarklet';
 import { CaptureError, importCapture, isCapturePayload, parseCapture, type CaptureDiagnostics, type CaptureParseResult } from '../lib/capture';
 import { db } from '../lib/db';
-import { executionsCSV, shareOrDownload } from '../lib/exporters';
-import { addDays, fmtDate, fmtMoney, fmtTime, todayISO } from '../lib/format';
+import { fmtDate, fmtMoney, fmtTime } from '../lib/format';
 import { importCSV, type ImportResult } from '../lib/importers';
 
 export default function ImportPage() {
@@ -15,33 +13,9 @@ export default function ImportPage() {
   const [error, setError] = useState<string | null>(null);
   const [fileName, setFileName] = useState('');
   const [busy, setBusy] = useState(false);
-  const [mirrorScope, setMirrorScope] = useState<'today' | '7' | '30' | 'all'>('today');
-  const [mirrorSource, setMirrorSource] = useState<'motivewave' | 'any'>('any');
   const fileRef = useRef<HTMLInputElement>(null);
   const toast = useToast();
   const nav = useNavigate();
-  const allTrades = useLiveQuery(() => db.trades.toArray(), []) ?? [];
-
-  const mirrorTrades = useMemo(() => {
-    let list = allTrades;
-    if (mirrorSource === 'motivewave') list = list.filter((t) => t.source === 'motivewave' || t.source === 'csv');
-    if (mirrorScope === 'today') list = list.filter((t) => t.date === todayISO());
-    else if (mirrorScope !== 'all') list = list.filter((t) => t.date >= addDays(todayISO(), -Number(mirrorScope)));
-    return list;
-  }, [allTrades, mirrorScope, mirrorSource]);
-
-  const mirror = async () => {
-    if (!mirrorTrades.length) {
-      toast('No executions in the selected range');
-      return;
-    }
-    const outcome = await shareOrDownload(`executions-${todayISO()}.csv`, executionsCSV(mirrorTrades), 'text/csv');
-    toast(
-      outcome === 'shared'
-        ? 'Share sheet opened — send the file to Trader One'
-        : 'Executions CSV downloaded — import it in Trader One',
-    );
-  };
 
   const [capture, setCapture] = useState<CaptureParseResult | null>(null);
   const [captureDiag, setCaptureDiag] = useState<CaptureDiagnostics | null>(null);
@@ -162,7 +136,7 @@ export default function ImportPage() {
 
         <div className="card" style={{ borderLeft: '3px solid var(--gold)' }}>
           <div className="card-title">
-            Extract FROM Trader One — Edge Capture <span className="hint">no API, no CSV export needed</span>
+            Extract from Trader One — Edge Capture <span className="hint">no API, no CSV export needed</span>
           </div>
           <p className="muted small" style={{ marginTop: 0 }}>
             Trader One has no API and no export, so Edge Capture takes the data anyway — two ways at once: it{' '}
@@ -239,37 +213,6 @@ export default function ImportPage() {
               </div>
             </div>
           )}
-        </div>
-
-        <div className="card">
-          <div className="card-title">
-            Mirror executions TO Trader One (Axia) <span className="hint">works on iPhone / iPad via the native share sheet</span>
-          </div>
-          <p className="muted small" style={{ marginTop: 0 }}>
-            Trader One has no public API, so a live push isn't possible — this is the reliable bridge: import your
-            MotiveWave executions here, then generate a clean executions file (one Buy and one Sell row per round
-            trip) and hand it to Trader One's importer. On an iOS device the button opens the <b>share sheet</b>, so
-            you can send the file straight to the Trader One app or Files; on desktop it downloads.
-          </p>
-          <div className="row">
-            <select value={mirrorSource} onChange={(e) => setMirrorSource(e.target.value as never)} title="Which trades to include">
-              <option value="any">All trades</option>
-              <option value="motivewave">MotiveWave / CSV imports only</option>
-            </select>
-            <select value={mirrorScope} onChange={(e) => setMirrorScope(e.target.value as never)} title="Date range">
-              <option value="today">Today</option>
-              <option value="7">Last 7 days</option>
-              <option value="30">Last 30 days</option>
-              <option value="all">All time</option>
-            </select>
-            <button className="btn primary" onClick={mirror} disabled={!mirrorTrades.length}>
-              Share / export {mirrorTrades.length} trade{mirrorTrades.length === 1 ? '' : 's'} ({mirrorTrades.length * 2} fills)
-            </button>
-          </div>
-          <p className="muted small" style={{ marginBottom: 0 }}>
-            Tip: this app itself works on iOS — open your deployed URL in Safari and use{' '}
-            <b>Share → Add to Home Screen</b> to run it like a native app on your iPhone or iPad.
-          </p>
         </div>
 
         {capture && (

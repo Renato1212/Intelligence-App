@@ -26,6 +26,14 @@ class EdgeDB extends Dexie {
       preps: '++id, &date',
       photos: '++id, [parentType+parentId]',
     });
+    // v4: uid index on every table for cloud sync (per-user, cross-device)
+    this.version(4).stores({
+      trades: '++id, uid, date, instrument, domain, strategyId, entryTime, importKey',
+      debriefs: '++id, uid, &date',
+      strategies: '++id, uid, name, status',
+      preps: '++id, uid, &date',
+      photos: '++id, uid, [parentType+parentId]',
+    });
     // v3: fixed overnight fields (dollarFx/gold/oil/euStocks/bunds) become a
     // per-day list of chosen markets
     this.version(3).upgrade(async (tx) => {
