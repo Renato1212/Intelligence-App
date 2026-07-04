@@ -47,11 +47,14 @@ function LoginScreen() {
     try {
       if (mode === 'signup') {
         const res = await signUp(email.trim(), password);
-        if (res.needsConfirmation) {
+        if (res.status === 'already-registered') {
+          setMsg({ text: 'That email already has an account — sign in instead.', kind: 'error' });
+          setMode('signin');
+        } else if (res.status === 'needs-confirmation') {
           setMsg({ text: 'Account created. Check your email to confirm, then sign in.', kind: 'ok' });
           setMode('signin');
         }
-        // if a session came back, AuthGate re-renders into the app automatically
+        // 'signed-in' → AuthGate re-renders into the app automatically
       } else {
         await signIn(email.trim(), password);
       }

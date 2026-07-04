@@ -34,7 +34,12 @@ export default function Account() {
     try {
       if (mode === 'signup') {
         const res = await signUp(email.trim(), password);
-        toast(res.needsConfirmation ? 'Account created — check your email to confirm, then sign in' : 'Account created and signed in');
+        if (res.status === 'already-registered') {
+          setMode('signin');
+          toast('That email already has an account — sign in instead');
+        } else {
+          toast(res.status === 'needs-confirmation' ? 'Account created — check your email to confirm, then sign in' : 'Account created and signed in');
+        }
       } else {
         await signIn(email.trim(), password);
         toast('Signed in — syncing your data');
