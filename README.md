@@ -81,12 +81,14 @@ profile is charted as a radar in Edge Analytics, so you can see which skill is l
   trades inside them.
 
 ### Accounts & cloud sync — one app, every trader has their own data
-Create a free profile (Account page) and everything — trades, debriefs, preparations, strategies,
-photos — syncs automatically to a cloud database a couple of seconds after you make a change, and
-pulls down on sign-in anywhere else. Row-level security means a signed-in trader can only ever read
-or write their own rows; two traders sharing this deployment never see each other's data. The app
-keeps working fully offline either way — the cloud copy is a mirror, not a requirement — and demo
-data is automatically kept out of your real cloud profile.
+The app opens on a **login wall**: each trader signs in to their own profile, so the same deployment
+can be shared across a whole desk. Everything — trades, debriefs, preparations, strategies, photos —
+syncs automatically to a cloud database a couple of seconds after you make a change, and pulls down
+on sign-in anywhere else. Row-level security means a signed-in trader can only ever read or write
+their own rows; two traders never see each other's data. Demo data is automatically kept out of your
+real cloud profile. (A "continue on this device without an account" link is available for local-only
+use, and the app keeps working fully offline either way — the cloud copy is a mirror, not a
+requirement.)
 
 ### AI Coach — turn your AI subscription into a trading analyst
 One click builds a complete Markdown dossier of your journal — overview stats, edge tables by

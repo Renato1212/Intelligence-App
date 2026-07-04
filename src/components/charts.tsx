@@ -109,7 +109,7 @@ export function DailyPnlChart({ trades, height = 200 }: { trades: Trade[]; heigh
             );
           }}
         />
-        <Bar dataKey="pnl" radius={[4, 4, 0, 0]} maxBarSize={24}>
+        <Bar dataKey="pnl" radius={[4, 4, 0, 0]} maxBarSize={24} isAnimationActive={false}>
           {data.map((d) => (
             <Cell key={d.date} fill={d.pnl >= 0 ? INK.profit : INK.loss} />
           ))}
@@ -159,7 +159,7 @@ export function BucketBarChart({
             );
           }}
         />
-        <Bar dataKey={valueKey} radius={[4, 4, 0, 0]} maxBarSize={24}>
+        <Bar dataKey={valueKey} radius={[4, 4, 0, 0]} maxBarSize={24} isAnimationActive={false}>
           {data.map((d) => (
             <Cell key={d.key} fill={colorBy ? colorBy(d.key) : d[valueKey] >= 0 ? INK.profit : INK.loss} />
           ))}
@@ -192,7 +192,7 @@ export function RollingExpectancyChart({ trades, window = 20, height = 220 }: { 
             );
           }}
         />
-        <Line type="monotone" dataKey="value" stroke="#3987e5" strokeWidth={2} dot={false} activeDot={{ r: 4, strokeWidth: 2, stroke: '#1a1815' }} />
+        <Line type="monotone" dataKey="value" stroke="#3987e5" strokeWidth={2} dot={false} isAnimationActive={false} activeDot={{ r: 4, strokeWidth: 2, stroke: '#1a1815' }} />
       </LineChart>
     </ResponsiveContainer>
   );
@@ -211,7 +211,7 @@ export function GradeRadar({ trades, height = 260 }: { trades: Trade[]; height?:
       <RadarChart data={data} outerRadius="72%">
         <PolarGrid stroke={INK.grid} />
         <PolarAngleAxis dataKey="criterion" tick={{ fill: INK.axis, fontSize: 11 }} />
-        <Radar dataKey="score" stroke={INK.gold} fill={INK.gold} fillOpacity={0.18} strokeWidth={2} />
+        <Radar dataKey="score" stroke={INK.gold} fill={INK.gold} fillOpacity={0.18} strokeWidth={2} isAnimationActive={false} />
         <Tooltip
           content={({ active, payload }) => {
             if (!active || !payload?.length) return null;

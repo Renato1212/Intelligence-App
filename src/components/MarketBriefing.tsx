@@ -58,13 +58,16 @@ export function MarketBriefing({ date }: { date: string }) {
           Live day-ahead briefing <span className="hint">events, prints and overnight moves — auto-updating</span>
         </div>
         <p className="muted small" style={{ marginTop: 0 }}>
-          Connect a free market-data key and this panel fills itself every morning: today's tier-1 economic events
-          with consensus and previous prints (actuals appear live as they hit), plus the overnight risk-sense read
-          across equities, vol, rates, dollar, metals and energy. Get a free key at{' '}
+          Connect a free market-data key and this panel fills itself every morning: the overnight risk-sense read
+          across equities, vol, rates, dollar, metals and energy (via liquid ETF proxies, which work on the free
+          plan), plus today's tier-1 economic events with consensus and previous prints — actuals appear live as
+          they hit. Get a free key at{' '}
           <a href="https://site.financialmodelingprep.com/developer/docs" target="_blank" rel="noreferrer">
             financialmodelingprep.com
-          </a>{' '}
-          — it stays in your browser only.
+          </a>
+          . It stays in your browser only. The overnight read works on the free plan; the economic calendar may
+          require one of their paid tiers — either way the panel shows whatever your plan allows and tells you if
+          something needs an upgrade.
         </p>
         <div className="row">
           <input
@@ -116,11 +119,12 @@ export function MarketBriefing({ date }: { date: string }) {
 
       {error && <div className="small" style={{ color: 'var(--loss)' }}>⚠ {error}</div>}
 
-      {briefing && briefing.quotes.length > 0 && (
-        <div>
-          <div className="small muted" style={{ marginBottom: 6 }}>
-            Overnight moves — the risk-sense read
-          </div>
+      <div>
+        <div className="small muted" style={{ marginBottom: 6 }}>
+          Overnight moves — the risk-sense read <span style={{ opacity: 0.7 }}>(ETF proxies)</span>
+        </div>
+        {briefing?.quotesError && <div className="small" style={{ color: 'var(--dom-news)', marginBottom: 6 }}>⚠ {briefing.quotesError}</div>}
+        {briefing && briefing.quotes.length > 0 && (
           <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 6 }}>
             {briefing.quotes.map((q) => {
               const pct = q.changePct;
@@ -150,15 +154,16 @@ export function MarketBriefing({ date }: { date: string }) {
               );
             })}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       <div>
         <div className="small muted" style={{ marginBottom: 6 }}>
           Scheduled events — plan the ones you wish to trade
         </div>
+        {briefing?.eventsError && <div className="small" style={{ color: 'var(--dom-news)', marginBottom: 6 }}>⚠ {briefing.eventsError}</div>}
         {!briefing || briefing.events.length === 0 ? (
-          <div className="muted small">No medium/high-impact events found for this day.</div>
+          <div className="muted small">{briefing?.eventsError ? '' : 'No medium/high-impact events found for this day.'}</div>
         ) : (
           <div className="table-wrap" style={{ maxHeight: 300, overflowY: 'auto' }}>
             <table className="data">
