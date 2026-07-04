@@ -1,6 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useRef, useState } from 'react';
 import type { LinkItem, Photo } from '../domain/types';
+import { currentUser, uploadMedia } from '../lib/cloud';
 import { db } from '../lib/db';
 import { fileToDataUrl } from '../lib/images';
 import { Modal, useToast } from './ui';
@@ -135,5 +136,55 @@ export function MediaEditor({
         </Modal>
       )}
     </div>
+  );
+}
+
+/**
+ * A video URL field with an upload option — the video is hosted in the
+ * trader's own cloud storage folder (Supabase, private-write/public-read)
+ * so nothing needs to live on a third-party video host. Falls back to a
+ * plain link when the trader isn't signed in.
+ */
+export function VideoField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const toast = useToast();
+  const signedIn = !!currentUser();
+
+  const upload = async (file: File | undefined) => {
+    if (!file) return;
+    setUploading(true);
+    try {
+      const url = await uploadMedia(file);
+      onChange(url);
+      toast('Video uploaded to your cloud storage');
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e));
+    }
+    setUploading(false);
+  };
+
+  return (
+    <label className="field">
+      <span>{label}</span>
+      <div className="row">
+        <input value={value} onChange={(e) => onChange(e.target.value)} placeholder="https://… or upload a file" style={{ flex: 1, minWidth: 160 }} />
+        <button
+          type="button"
+          className="btn sm"
+          disabled={uploading}
+          onClick={() => (signedIn ? fileRef.current?.click() : toast('Sign in on the Account page to upload and host videos'))}
+          title={signedIn ? 'Upload a video file to your private cloud storage' : 'Sign in on the Account page to upload videos'}
+        >
+          {uploading ? 'Uploading…' : '⬆ Upload video'}
+        </button>
+        <input ref={fileRef} type="file" accept="video/*" style={{ display: 'none' }} onChange={(e) => upload(e.target.files?.[0])} />
+      </div>
+      {value && (
+        <a href={value} target="_blank" rel="noreferrer" className="small">
+          Open video ↗
+        </a>
+      )}
+    </label>
   );
 }

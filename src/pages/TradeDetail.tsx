@@ -1,7 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { MediaEditor } from '../components/media';
+import { MediaEditor, VideoField } from '../components/media';
 import { DomainChip, PnL, SideBadge, useToast } from '../components/ui';
 import { CRITERIA, DOMAINS, domainOf, GRADE_LEVELS } from '../domain/taxonomy';
 import type { CriterionId, Execution, GradeLevel, Trade } from '../domain/types';
@@ -255,15 +255,7 @@ export default function TradeDetail() {
               <span>How to apply what you learned</span>
               <textarea value={draft.applyNext} onChange={(e) => set('applyNext', e.target.value)} rows={3} />
             </label>
-            <label className="field">
-              <span>Video (recording / replay link)</span>
-              <input value={draft.videoUrl} onChange={(e) => set('videoUrl', e.target.value)} placeholder="https://…" />
-            </label>
-            {draft.videoUrl && (
-              <a href={draft.videoUrl} target="_blank" rel="noreferrer" className="small">
-                Open video ↗
-              </a>
-            )}
+            <VideoField label="Video (recording / replay)" value={draft.videoUrl} onChange={(v) => set('videoUrl', v)} />
             <hr className="divider" />
             <MediaEditor
               parentType="trade"

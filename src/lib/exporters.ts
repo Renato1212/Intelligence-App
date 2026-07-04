@@ -14,25 +14,6 @@ export function downloadFile(name: string, content: string, mime: string) {
   URL.revokeObjectURL(a.href);
 }
 
-/**
- * On iOS/Android this opens the native share sheet (Files, AirDrop, other
- * apps — e.g. a journaling platform's import). Falls back to a download.
- */
-export async function shareOrDownload(name: string, content: string, mime: string): Promise<'shared' | 'downloaded'> {
-  const file = new File([content], name, { type: mime });
-  const nav = navigator as Navigator & { canShare?: (d: { files: File[] }) => boolean };
-  if (nav.share && nav.canShare?.({ files: [file] })) {
-    try {
-      await nav.share({ files: [file], title: name });
-      return 'shared';
-    } catch {
-      // user cancelled or share failed — fall through to download
-    }
-  }
-  downloadFile(name, content, mime);
-  return 'downloaded';
-}
-
 /** Open a print-ready view in a new tab; the browser's print dialog saves it as PDF. */
 export function openPrintView(title: string, bodyHtml: string) {
   const w = window.open('', '_blank');
@@ -327,22 +308,5 @@ export function tradesToCSV(trades: Trade[]): string {
       .map(csvCell)
       .join(','),
   );
-  return [header.join(','), ...rows].join('\n');
-}
-
-/**
- * Executions CSV: two fill rows per round-trip trade (entry + exit), the
- * generic format journaling platforms (e.g. Trader One) accept for import.
- */
-export function executionsCSV(trades: Trade[]): string {
-  const header = ['Date', 'Time', 'Symbol', 'Side', 'Quantity', 'Price', 'Account'];
-  const rows: string[] = [];
-  const seq = [...trades].sort((a, b) => a.entryTime.localeCompare(b.entryTime));
-  for (const t of seq) {
-    const open = t.side === 'LONG' ? 'Buy' : 'Sell';
-    const close = t.side === 'LONG' ? 'Sell' : 'Buy';
-    rows.push([t.entryTime.slice(0, 10), t.entryTime.slice(11, 19), t.instrument, open, t.qty, t.entryPrice, t.account].map(csvCell).join(','));
-    rows.push([t.exitTime.slice(0, 10), t.exitTime.slice(11, 19), t.instrument, close, t.qty, t.exitPrice, t.account].map(csvCell).join(','));
-  }
   return [header.join(','), ...rows].join('\n');
 }

@@ -2,7 +2,9 @@
 
 **The data-centered intelligence platform for futures traders.** Track, analyse and develop trading
 strategies around the 5 Edge Domain framework — with the journal, debrief and coach-grading workflow
-built in, and stunning analytics that show you exactly where your edge is and whether it is growing.
+built in, stunning analytics that show you exactly where your edge is and whether it is growing,
+multi-trader cloud accounts, and an AI Coach that turns any AI subscription into a personal
+performance analyst with full access to your data.
 
 ![Dashboard](docs/dashboard.png)
 
@@ -17,8 +19,10 @@ built in, and stunning analytics that show you exactly where your edge is and wh
 - **Any other platform** — any CSV with symbol, entry/exit time, price, quantity and (optionally)
   P&L columns works. Headers are matched by name; column order and naming variants don't matter.
 - Re-importing the same file is safe — duplicates are detected and skipped.
-- **Everything stays private**: all data lives locally in your browser (IndexedDB). Nothing is ever
-  sent to a server. One-click JSON backup / restore in Settings.
+- **Private by default, synced by choice**: all data lives locally in your browser (IndexedDB) and
+  works fully offline. Create a free account (Account page) to sync everything to your own cloud
+  profile — protected by row-level security so every trader only ever sees their own data — and
+  pick it up on any device. One-click JSON backup / restore in Settings either way.
 
 ### The 5 Edge Domain framework, built in
 The whole app speaks the AXIA edge-domain language:
@@ -54,21 +58,49 @@ profile is charted as a radar in Edge Analytics, so you can see which skill is l
   video link, planned risk (giving automatic R-multiples).
 - **Daily debrief** — narrative, comparison with your preparation and hypothesis, lesson, action;
   1–5 self-scores for preparation and execution quality; the day's trades and P&L shown alongside.
-- **Photos & links everywhere** — attach chart screenshots / phone photos (stored locally,
-  auto-resized) and clickable links to trades, debriefs and preparations.
+- **Photos & videos everywhere** — attach chart screenshots / phone photos (resized and stored
+  locally so they work offline) and videos to trades, debriefs and preparations. Sign in and a
+  video can be **uploaded and hosted directly in your own private cloud storage folder** with one
+  click — no third-party video host required — or just paste any external link instead.
 - **Exports** — preparation, trades and debrief each downloadable on their own or combined as a
   full day pack (photos included), in Markdown, JSON or a print-ready page (save as PDF);
   individual trade debriefs too, and any filtered trade list as CSV.
-- **Trader One (Axia) mirroring** — generate an executions CSV (entry + exit fills per round trip)
-  from your MotiveWave imports and hand it to Trader One; on iPhone/iPad the button opens the
-  native share sheet so the file goes straight to the Trader One app or Files.
-- **Edge Capture — extract FROM Trader One** (or any web journal with no API/export): a
-  bookmarklet runs inside your logged-in page, reads every visible trade table plus row images off
-  the screen, and downloads an `edge-capture.json` that imports here — stats, tags, descriptions
-  and photos included. Existing trades are enriched, never duplicated; nothing leaves your browser.
+- **Edge Capture — extract from Trader One** (or any web journal with no API/export): a
+  bookmarklet records the JSON the page itself downloads (works even on canvas-rendered apps with
+  no readable DOM) and continuously scans visible trade tables — including the **Order History /
+  executions view**, so every scale-in/scale-out fill (exact size, price, time, market/limit type)
+  attaches to its trade. Produces an `edge-capture.json` that imports here — stats, tags,
+  descriptions, per-fill execution detail and photos included. Existing trades are enriched, never
+  duplicated. If a platform's layout isn't recognised, the app shows the raw headers/field names it
+  found so support can be added precisely. Nothing leaves your browser during capture.
+- **Execution ladder** — for trades with fill-level detail, the trade page shows every fill labelled
+  Entry / Scale-in / Scale-out / Exit, with the running position size and the evolving average price
+  of the open position — built for studying your scaling decisions, not just the averaged result.
 - **Study filters** — combine domain, instrument, date and multi-tag filters (setups, phases,
   data events like NFP / CPI / ISM…) across trades, and filter journal days by the tags of the
   trades inside them.
+
+### Accounts & cloud sync — one app, every trader has their own data
+Create a free profile (Account page) and everything — trades, debriefs, preparations, strategies,
+photos — syncs automatically to a cloud database a couple of seconds after you make a change, and
+pulls down on sign-in anywhere else. Row-level security means a signed-in trader can only ever read
+or write their own rows; two traders sharing this deployment never see each other's data. The app
+keeps working fully offline either way — the cloud copy is a mirror, not a requirement — and demo
+data is automatically kept out of your real cloud profile.
+
+### AI Coach — turn your AI subscription into a trading analyst
+One click builds a complete Markdown dossier of your journal — overview stats, edge tables by
+domain/setup/hour/instrument, your coach grade profile, every strategy with its sample stats, the
+full chronological trade log (including per-fill scaling detail, tags, descriptions and lessons),
+every daily debrief and every preparation with its hypotheses — sized for pasting or attaching to
+Claude, ChatGPT or Gemini. Ready-made prompts find hidden patterns, audit your scaling decisions,
+grade you like an AXIA coach, and build next week's plan.
+
+### Live day-ahead briefing
+The preparation page can connect a free market-data key (financialmodelingprep.com) and fills
+itself in every morning: today's tier-1 economic events with consensus and previous prints —
+actuals appear the moment they're released — plus an overnight risk-sense read across equities,
+vol, rates, dollar, metals and energy. Auto-refreshes while you prepare.
 
 ### Analytics that answer real questions
 ![Analytics](docs/analytics.png)
@@ -110,7 +142,9 @@ dataset, then clear it in Settings and import your own trades.
 ## Tech
 
 - React 18 + TypeScript + Vite
-- Dexie (IndexedDB) — local-first, private by design
+- Dexie (IndexedDB) — local-first, offline-capable
+- Supabase (Postgres + Auth + Storage) — optional cloud accounts, row-level-security-protected
+  sync, and private media storage
 - Recharts — visualizations follow a validated dark-surface palette (colorblind-safe categorical
   colors, diverging profit/loss encoding)
-- No backend, no accounts, no telemetry
+- No telemetry; data never leaves your device unless you create an account

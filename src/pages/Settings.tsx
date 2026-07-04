@@ -1,6 +1,8 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useToast } from '../components/ui';
+import { currentUser } from '../lib/cloud';
 import { clearAllData, db, exportBackup, importBackup } from '../lib/db';
 import { loadDemoData } from '../lib/demo';
 import { POINT_VALUES } from '../lib/contracts';
@@ -49,9 +51,14 @@ export default function Settings() {
         <div>
           <h1 className="page-title">Settings & data</h1>
           <p className="page-sub">
-            All data is stored locally in your browser (IndexedDB). Nothing is sent anywhere — back it up regularly.
+            {currentUser()
+              ? 'Signed in — your data syncs to your cloud profile automatically. It also stays cached locally for offline use.'
+              : 'All data is stored locally in your browser (IndexedDB). Create a profile on the Account page to sync it to the cloud and access it from any device.'}
           </p>
         </div>
+        <Link to="/account" className="btn">
+          {currentUser() ? 'Manage account & sync' : 'Sign in / create profile'}
+        </Link>
       </div>
 
       <div className="stack">
@@ -126,7 +133,10 @@ export default function Settings() {
           <div className="card-title" style={{ color: 'var(--loss)' }}>
             Danger zone
           </div>
-          <p className="muted small">Removes every trade, debrief and strategy from this browser. Download a backup first.</p>
+          <p className="muted small">
+            Removes every trade, debrief and strategy from this browser. Download a backup first.
+            {currentUser() && ' If you are signed in, this only clears the local copy on this device — your cloud copy is untouched, so "Sync now" on the Account page restores it.'}
+          </p>
           <button
             className="btn danger"
             onClick={async () => {

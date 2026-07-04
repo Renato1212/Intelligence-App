@@ -2,7 +2,8 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useState } from 'react';
 import type { DayPrep, Hypothesis, PrepEvent } from '../domain/types';
 import { db, emptyPrep } from '../lib/db';
-import { MediaEditor } from './media';
+import { MarketBriefing } from './MarketBriefing';
+import { MediaEditor, VideoField } from './media';
 import { useToast } from './ui';
 
 const HYP_COLORS: Record<string, string> = { 'H1 Red': '#e66767', 'H2 Blue': '#3987e5', 'H3 Green': '#0ca30c' };
@@ -78,6 +79,8 @@ export function PrepEditor({ date }: { date: string }) {
           </span>
         ))}
       </div>
+
+      <MarketBriefing date={date} />
 
       <div className="card stack">
         <div className="card-title">
@@ -270,10 +273,7 @@ export function PrepEditor({ date }: { date: string }) {
 
       <div className="card stack">
         <div className="card-title">Preparation media</div>
-        <label className="field">
-          <span>Preparation video (recording of your prep / market walk-through)</span>
-          <input value={draft.videoUrl ?? ''} onChange={(e) => set('videoUrl', e.target.value)} placeholder="https://…" />
-        </label>
+        <VideoField label="Preparation video (recording of your prep / market walk-through)" value={draft.videoUrl ?? ''} onChange={(v) => set('videoUrl', v)} />
         <MediaEditor
           parentType="prep"
           parentId={draft.id ?? null}
