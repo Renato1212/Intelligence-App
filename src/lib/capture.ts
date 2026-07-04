@@ -76,6 +76,14 @@ export interface CaptureParseResult {
   items: CaptureItem[];
   warnings: string[];
   sourceUrl: string;
+  /** total fills matched across all trades */
+  fillsFound: number;
+  /**
+   * When no fills were found: field-name samples of every JSON array the
+   * capture recorded, so the execution structure can be seen/shared and
+   * mapped precisely if the shape detector still missed it.
+   */
+  structureSamples: { url: string; keys: string[]; sampleRow: Record<string, unknown> }[];
 }
 
 function toCSVText(headers: string[], rows: string[][]): string {
@@ -121,42 +129,111 @@ const JSON_KEYS: Record<string, string[]> = {
   executions: ['executions', 'fills', 'orders', 'legs', 'fillslist'],
 };
 
-const EXEC_KEYS: Record<string, string[]> = {
-  price: ['avgfillprice', 'fillprice', 'executionprice', 'filledprice', 'price', 'avgprice', 'limitprice'],
-  time: ['filledat', 'executedat', 'filltime', 'executiontime', 'transacttime', 'createdat', 'created', 'updatedat', 'timestamp', 'time'],
-  type: ['ordertype', 'type'],
-  status: ['status', 'orderstatus', 'state'],
-};
+/* ---------- shape-based fill detection (field-name agnostic) ---------- */
+// Trader One's exact API field names are unknown, so instead of matching a
+// fixed alias list we detect a "fill" by its SHAPE: one price, a quantity,
+// and a side or a timestamp — and crucially NOT a round-trip trade (which
+// carries a pnl or an entry+exit price pair).
 
-function pickExecKey(flat: Record<string, unknown>, field: string): unknown {
-  for (const alias of EXEC_KEYS[field]) {
-    if (alias in flat && flat[alias] != null && flat[alias] !== '') return flat[alias];
+function fuzzy(flat: Record<string, unknown>, needles: string[], exclude: string[] = []): unknown {
+  for (const [k, v] of Object.entries(flat)) {
+    if (v == null || v === '') continue;
+    if (exclude.some((x) => k.includes(x))) continue;
+    if (needles.some((n) => k.includes(n))) return v;
   }
   return undefined;
 }
 
-/** Convert a JSON object to an execution; symbol optional (embedded fills inherit the trade's). */
-function objectToExecution(raw: Record<string, unknown>, dateHint?: string): { instrument: string | null; exec: Execution } | null {
+function fuzzyNum(flat: Record<string, unknown>, needles: string[], exclude: string[] = []): number | null {
+  for (const [k, v] of Object.entries(flat)) {
+    if (v == null || v === '') continue;
+    if (exclude.some((x) => k.includes(x))) continue;
+    if (needles.some((n) => k.includes(n))) {
+      const n = toNum(v);
+      if (n != null) return n;
+    }
+  }
+  return null;
+}
+
+const SIDE_VALUE = /^(buy|sell|b|s|long|short|bot|sld|bought|sold|bid|ask|bo|so)$/i;
+
+/** Find a buy/sell side by scanning VALUES (field names for side vary wildly). */
+function findSide(flat: Record<string, unknown>): 'BUY' | 'SELL' | null {
+  // prefer a field whose NAME hints at side, else any field whose VALUE is a side word
+  const named = fuzzy(flat, ['side', 'action', 'direction', 'buysell', 'aggressor', 'way']);
+  const candidates = named != null ? [named] : Object.values(flat);
+  for (const v of candidates) {
+    if (typeof v !== 'string') continue;
+    const s = v.trim().toLowerCase();
+    if (!SIDE_VALUE.test(s)) continue;
+    if (/^(s|sell|short|sld|sold|ask|so)/.test(s)) return 'SELL';
+    if (/^(b|buy|long|bot|bought|bid|bo)/.test(s)) return 'BUY';
+  }
+  return null;
+}
+
+function looksLikeTimeValue(v: unknown): boolean {
+  if (typeof v === 'number') return v > 1e12 && v < 4e12; // epoch ms
+  if (typeof v !== 'string') return false;
+  return /\d{4}-\d{2}-\d{2}/.test(v) || /\d{1,2}[/.]\d{1,2}[/.]\d{2,4}/.test(v) || /^\d{13}$/.test(v);
+}
+
+/** Find a fill timestamp: by field-name hint first, else any timestamp-looking value. */
+function findTime(flat: Record<string, unknown>, dateHint?: string): string | null {
+  const named = fuzzy(flat, ['filledat', 'executedat', 'transacttime', 'filltime', 'executiontime', 'createdat', 'created', 'time', 'date', 'updatedat', 'timestamp', 'ts', 'when', 'at']);
+  if (named != null) {
+    const t = toWhen(named, dateHint);
+    if (t) return t;
+  }
+  for (const v of Object.values(flat)) {
+    if (looksLikeTimeValue(v)) {
+      const t = toWhen(v, dateHint);
+      if (t) return t;
+    }
+  }
+  return null;
+}
+
+/** Does this object look like a single fill (not a completed round-trip trade)? */
+function looksLikeFill(flat: Record<string, unknown>): boolean {
+  // a completed trade has a pnl, or both an entry and an exit price → not a fill
+  const hasPnl = fuzzyNum(flat, ['pnl', 'profit', 'realized', 'gainloss']) != null;
+  const hasEntry = fuzzyNum(flat, ['entryprice', 'openprice', 'avgopen', 'avgentry']) != null;
+  const hasExit = fuzzyNum(flat, ['exitprice', 'closeprice', 'avgclose', 'avgexit']) != null;
+  if (hasPnl || (hasEntry && hasExit)) return false;
+  const price = fuzzyNum(flat, ['price', 'px', 'rate'], ['entryprice', 'exitprice', 'stopprice', 'targetprice']);
+  const qty = fuzzyNum(flat, ['qty', 'quantity', 'size', 'lots', 'contracts', 'volume', 'filled', 'amount'], ['pnl']);
+  if (price == null || qty == null || qty === 0) return false;
+  return findSide(flat) != null || findTime(flat) != null;
+}
+
+/** Extract a fill from any fill-shaped object, by shape (field names ignored). */
+function fillFromObject(raw: Record<string, unknown>, dateHint?: string): { instrument: string | null; exec: Execution } | null {
   const flat = flatten(raw);
-  const status = String(pickExecKey(flat, 'status') ?? '').toLowerCase();
-  if (status && !/fill|complete|done|executed/.test(status)) return null;
-  const time = toWhen(pickExecKey(flat, 'time'), dateHint);
-  const price = toNum(pickExecKey(flat, 'price'));
-  const qtyRaw = toNum(pickKey(flat, 'qty'));
-  if (!time || price == null || !qtyRaw) return null;
-  const sideRaw = String(pickKey(flat, 'side') ?? '').toLowerCase();
-  const action: 'BUY' | 'SELL' = sideRaw.startsWith('s') ? 'SELL' : sideRaw.startsWith('b') || sideRaw === 'long' ? 'BUY' : qtyRaw < 0 ? 'SELL' : 'BUY';
-  const symRaw = pickKey(flat, 'symbol');
+  const status = String(fuzzy(flat, ['status', 'state']) ?? '').toLowerCase();
+  if (status && /cancel|reject|working|pending|open|new|expired/.test(status) && !/partiallyfilled|filled/.test(status)) return null;
+  if (!looksLikeFill(flat)) return null;
+  const price = fuzzyNum(flat, ['price', 'px', 'rate'], ['entryprice', 'exitprice', 'stopprice', 'targetprice'])!;
+  const qtySigned = fuzzyNum(flat, ['qty', 'quantity', 'size', 'lots', 'contracts', 'volume', 'filled', 'amount'], ['pnl'])!;
+  const time = findTime(flat, dateHint);
+  if (!time || !qtySigned) return null;
+  const action: 'BUY' | 'SELL' = findSide(flat) ?? (qtySigned < 0 ? 'SELL' : 'BUY');
+  const typeRaw = fuzzy(flat, ['ordertype', 'ordkind', 'type']);
+  const symRaw = fuzzy(flat, ['symbol', 'instrument', 'contract', 'product', 'ticker', 'market', 'sym']);
   return {
-    instrument: typeof symRaw === 'string' && symRaw.trim() && symRaw.length <= 20 ? symbolRoot(symRaw.trim()) : null,
-    exec: {
-      time,
-      action,
-      qty: Math.abs(qtyRaw),
-      price,
-      orderType: normalizeOrderType(typeof pickExecKey(flat, 'type') === 'string' ? (pickExecKey(flat, 'type') as string) : null),
-    },
+    instrument: typeof symRaw === 'string' && symRaw.trim() && symRaw.length <= 24 ? symbolRoot(symRaw.trim()) : null,
+    exec: { time, action, qty: Math.abs(qtySigned), price, orderType: normalizeOrderType(typeof typeRaw === 'string' ? typeRaw : null) },
   };
+}
+
+/** Does an array look like a list of fills (majority fill-shaped, none pnl-bearing)? */
+function arrayLooksLikeFills(arr: Record<string, unknown>[]): boolean {
+  if (arr.length < 1) return false;
+  let fills = 0;
+  for (const o of arr.slice(0, 30)) if (looksLikeFill(flatten(o))) fills++;
+  const sampled = Math.min(arr.length, 30);
+  return fills >= Math.max(1, sampled * 0.6);
 }
 
 const execKey = (e: Execution) => [e.time, e.action, e.qty, e.price].join('|');
@@ -373,18 +450,21 @@ function objectToItem(raw: Record<string, unknown>): CaptureItem | null {
   t.learned = str('learned');
   t.applyNext = str('applyNext');
   t.videoUrl = str('video');
-  // fills embedded directly on the trade object (executions/fills/legs arrays)
-  const execsRaw = pickKey(flat, 'executions');
+  // fills embedded on the trade object: scan EVERY array-valued property
+  // (any name) for one whose objects are fill-shaped — Trader One may nest
+  // the fills under a key we can't predict.
   const executions: Execution[] = [];
-  if (Array.isArray(execsRaw)) {
-    for (const e of execsRaw.slice(0, 60)) {
-      if (e && typeof e === 'object' && !Array.isArray(e)) {
-        const conv = objectToExecution(e as Record<string, unknown>, dateHint);
-        if (conv) executions.push(conv.exec);
+  for (const v of Object.values(raw)) {
+    if (!Array.isArray(v) || !v.length) continue;
+    const objs = v.filter((x) => x && typeof x === 'object' && !Array.isArray(x)) as Record<string, unknown>[];
+    if (objs.length && arrayLooksLikeFills(objs)) {
+      for (const o of objs.slice(0, 80)) {
+        const f = fillFromObject(o, dateHint);
+        if (f) executions.push(f.exec);
       }
     }
-    executions.sort((a, b) => a.time.localeCompare(b.time));
   }
+  executions.sort((a, b) => a.time.localeCompare(b.time));
   if (executions.length) t.executions = executions;
   t.importKey = makeImportKey(t);
   return { trade: t, images: [], imageLinks, executions };
@@ -413,12 +493,14 @@ function itemsFromRequests(requests: { url: string; body: string }[]): {
         items.push(...converted);
         continue;
       }
-      // not trades — maybe an order-history / executions array
-      const execs = arr
-        .map((o) => objectToExecution(o))
-        .filter((x): x is { instrument: string | null; exec: Execution } => x != null && x.instrument != null);
-      if (execs.length && execs.length >= arr.length * 0.5) {
-        for (const e of execs) execPool.push(e as { instrument: string; exec: Execution });
+      // not trades — maybe an order-history / executions/fills array. Detect
+      // by shape so field naming doesn't matter, and require an instrument so
+      // the fills can be matched back to a trade.
+      if (arrayLooksLikeFills(arr)) {
+        for (const o of arr) {
+          const f = fillFromObject(o);
+          if (f && f.instrument) execPool.push({ instrument: f.instrument, exec: f.exec });
+        }
       }
     }
   }
@@ -549,7 +631,32 @@ export function parseCapture(text: string): CaptureParseResult {
 
     throw new CaptureError({ hint, raw: d, tableSamples, jsonKeySamples });
   }
-  return { items, warnings, sourceUrl: payload.url ?? '' };
+
+  const fillsFound = items.reduce((s, i) => s + i.executions.length, 0);
+  // when no fills came through, surface the structure of every captured JSON
+  // array so the execution data can be seen (and mapped if the detector missed)
+  const structureSamples: CaptureParseResult['structureSamples'] = [];
+  if (!fillsFound) {
+    for (const req of payload.requests ?? []) {
+      if (structureSamples.length >= 8) break;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(req.body);
+      } catch {
+        continue;
+      }
+      const arrays: Record<string, unknown>[][] = [];
+      collectArrays(parsed, arrays);
+      for (const arr of arrays) {
+        if (structureSamples.length >= 8) break;
+        if (arr[0] && typeof arr[0] === 'object') {
+          structureSamples.push({ url: req.url.slice(0, 120), keys: Object.keys(flatten(arr[0])), sampleRow: arr[0] });
+        }
+      }
+    }
+  }
+
+  return { items, warnings, sourceUrl: payload.url ?? '', fillsFound, structureSamples };
 }
 
 /**

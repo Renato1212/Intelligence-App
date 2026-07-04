@@ -175,9 +175,13 @@ export default function ImportPage() {
             <li>
               <b>Record:</b> log in to Trader One and click the bookmark <b>first</b> — a gold “recording” badge
               appears. Then open your trade log / journal pages (expand the date range, scroll through everything you
-              want) so the data loads while it records. <b>Also open the Order History / executions view</b> — those
-              rows become the per-fill scale-in/out detail (exact size, price, time and market/limit type) attached
-              to each trade.
+              want) so the data loads while it records.
+            </li>
+            <li>
+              <b>For scale-in/out detail:</b> while still recording, <b>click into a few individual trades</b> to
+              open their detail — Trader One loads the individual fills (exact size, price, time and market/limit
+              type) only when you view a trade, and the recorder captures them as it happens. Do this for any trades
+              whose execution breakdown you want to study.
             </li>
             <li>
               <b>Finish:</b> click the gold badge — the <span className="mono">edge-capture.json</span> downloads.
@@ -283,6 +287,33 @@ export default function ImportPage() {
                 </tbody>
               </table>
             </div>
+            {capture.fillsFound === 0 && capture.structureSamples.length > 0 && (
+              <div className="small" style={{ marginTop: 10, padding: 10, border: '1px solid var(--hairline)', borderRadius: 8 }}>
+                <div className="spread" style={{ marginBottom: 6 }}>
+                  <b style={{ color: 'var(--dom-news)' }}>No per-fill execution detail was found in this capture.</b>
+                  <button
+                    className="btn sm"
+                    onClick={() => {
+                      navigator.clipboard.writeText(JSON.stringify(capture.structureSamples, null, 2));
+                      toast('Captured data structure copied — send it so I can map the executions exactly');
+                    }}
+                  >
+                    Copy captured data structure
+                  </button>
+                </div>
+                <p className="muted" style={{ margin: '0 0 6px' }}>
+                  To get scale-in/out detail, run the capture again and — while the gold badge is recording —{' '}
+                  <b>open a few individual trades</b> so their fills load (Trader One fetches the executions when you
+                  view a trade). If it still shows no fills, the field names below are what the platform sent; send me
+                  the copied structure and I'll map them precisely.
+                </p>
+                {capture.structureSamples.slice(0, 6).map((s, i) => (
+                  <div key={i} className="mono" style={{ marginBottom: 4, wordBreak: 'break-word', opacity: 0.85 }}>
+                    {s.url}: {'{'} {s.keys.slice(0, 16).join(', ')} {'}'}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
