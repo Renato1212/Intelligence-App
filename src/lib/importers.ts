@@ -9,6 +9,12 @@ export interface ImportResult {
   warnings: string[];
   /** For trade-log parses: index of the source data row each trade came from (aligned with `trades`). */
   sourceRows: number[];
+  /**
+   * For fills exports: every individual execution, tagged with its instrument.
+   * Lets the app attach these fills to already-imported trades (e.g. a Trader
+   * One journal) by time-matching, instead of only reconstructing new trades.
+   */
+  executionPool?: { instrument: string; exec: import('../domain/types').Execution }[];
 }
 
 /** Find the index of the first header matching any alias (by normalized key). */
@@ -393,5 +399,6 @@ export function importCSV(text: string): ImportResult {
 
   const trades = parseFills(headers, dataRows, warnings);
   if (!trades.length) throw new Error('No completed round-trip trades found in fills — check the file format');
-  return { trades, format: 'fills', warnings, sourceRows: [] };
+  const executionPool = trades.flatMap((t) => (t.executions ?? []).map((exec) => ({ instrument: t.instrument, exec })));
+  return { trades, format: 'fills', warnings, sourceRows: [], executionPool };
 }

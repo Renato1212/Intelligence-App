@@ -26,24 +26,33 @@ const SRC = `(function(){try{
 if(window.__edgeCap){window.__edgeCap.finish();return;}
 var SEP=String.fromCharCode(1);
 function txt(el){return ((el&&el.innerText)||'').replace(/\\s+/g,' ').trim();}
-var state={reqs:[],ws:[],acc:{},scans:0};
+var state={reqs:[],ws:[],acc:{},scans:0,hooked:0};
 function looksJson(s){if(!s)return false;var t=s.replace(/^\\uFEFF/,'').trimStart();return t.charAt(0)==='{'||t.charAt(0)==='[';}
-var OF=window.fetch;
-if(OF){window.fetch=function(){var a=arguments;var u=(typeof a[0]==='string')?a[0]:((a[0]&&a[0].url)||'');var p=OF.apply(this,a);
-p.then(function(r){try{r.clone().text().then(function(s){if(looksJson(s)&&s.length<4000000&&state.reqs.length<400)state.reqs.push({url:String(u),body:s});}).catch(function(){});}catch(e){}}).catch(function(){});
-return p;};}
-var OO=XMLHttpRequest.prototype.open,OS=XMLHttpRequest.prototype.send;
-XMLHttpRequest.prototype.open=function(m,u){this.__ec=String(u||'');return OO.apply(this,arguments);};
-XMLHttpRequest.prototype.send=function(){var x=this;x.addEventListener('load',function(){try{
-var s=(x.responseType===''||x.responseType==='text')?x.responseText:(x.responseType==='json'?JSON.stringify(x.response):'');
-if(looksJson(s)&&s.length<4000000&&state.reqs.length<400)state.reqs.push({url:x.__ec||'',body:s});}catch(e){}});
-return OS.apply(this,arguments);};
-try{var OWS=window.WebSocket;
-if(OWS){var NWS=function(url,protos){var ws=(arguments.length>1)?new OWS(url,protos):new OWS(url);
-try{ws.addEventListener('message',function(ev){try{var d=ev.data;if(typeof d==='string'&&d.length<2000000&&state.ws.length<2000)state.ws.push({url:String(url),body:d});}catch(e){}});}catch(e){}
-return ws;};
-NWS.prototype=OWS.prototype;NWS.CONNECTING=OWS.CONNECTING;NWS.OPEN=OWS.OPEN;NWS.CLOSING=OWS.CLOSING;NWS.CLOSED=OWS.CLOSED;
-try{window.WebSocket=NWS;}catch(e){}}}catch(e){}
+function pushReq(u,s){try{if(looksJson(s)&&s.length<4000000&&state.reqs.length<400)state.reqs.push({url:String(u||''),body:s});}catch(e){}}
+function pushWs(u,d){try{if(typeof d==='string'&&d.length<2000000&&state.ws.length<2000)state.ws.push({url:String(u||''),body:d});}catch(e){}}
+var OFETCH=window.fetch;
+// Hook the network APIs of a JS realm. Trading apps like Trader One run the
+// whole UI inside same-origin iframes, so the WebSocket that streams fills
+// and the XHR/fetch that load a trade's executions live in the IFRAME's
+// realm — patching only the top window (which we used to do) captured
+// nothing. We patch every reachable realm and re-run for late/added frames.
+function hookRealm(win){try{
+if(!win||win.__ecHooked)return;win.__ecHooked=true;state.hooked++;
+try{var OF=win.fetch;if(OF){win.fetch=function(){var a=arguments;var u=(typeof a[0]==='string')?a[0]:((a[0]&&a[0].url)||'');var p=OF.apply(this,a);
+try{p.then(function(r){try{r.clone().text().then(function(s){pushReq(u,s);}).catch(function(){});}catch(e){}}).catch(function(){});}catch(e){}return p;};}}catch(e){}
+try{var XP=win.XMLHttpRequest&&win.XMLHttpRequest.prototype;if(XP&&!XP.__ecHooked){XP.__ecHooked=true;var OO=XP.open,OS=XP.send;
+XP.open=function(m,u){try{this.__ec=String(u||'');}catch(e){}return OO.apply(this,arguments);};
+XP.send=function(){var x=this;try{x.addEventListener('load',function(){try{var s=(x.responseType===''||x.responseType==='text')?x.responseText:(x.responseType==='json'?JSON.stringify(x.response):'');pushReq(x.__ec,s);}catch(e){}});}catch(e){}return OS.apply(this,arguments);};}}catch(e){}
+try{var OWS=win.WebSocket;if(OWS){var NWS=function(url,protos){var ws=(arguments.length>1)?new OWS(url,protos):new OWS(url);
+try{ws.addEventListener('message',function(ev){try{pushWs(url,ev.data);}catch(e){}});}catch(e){}return ws;};
+try{NWS.prototype=OWS.prototype;NWS.CONNECTING=OWS.CONNECTING;NWS.OPEN=OWS.OPEN;NWS.CLOSING=OWS.CLOSING;NWS.CLOSED=OWS.CLOSED;}catch(e){}
+try{win.WebSocket=NWS;}catch(e){}}}catch(e){}
+try{var OES=win.EventSource;if(OES){var NES=function(url,cfg){var es=(arguments.length>1)?new OES(url,cfg):new OES(url);
+try{es.addEventListener('message',function(ev){try{pushWs(url,ev.data);}catch(e){}});}catch(e){}return es;};
+try{NES.prototype=OES.prototype;}catch(e){}try{win.EventSource=NES;}catch(e){}}}catch(e){}
+}catch(e){}}
+function hookFrames(){try{var ifr=document.querySelectorAll('iframe');for(var i=0;i<ifr.length;i++){try{hookRealm(ifr[i].contentWindow);}catch(e){}}}catch(e){}}
+hookRealm(window);hookFrames();
 function docsList(){var out=[document],cross=0,ifr=document.querySelectorAll('iframe');
 for(var i=0;i<ifr.length;i++){try{var d=ifr[i].contentDocument;if(d&&d.body)out.push(d);else cross++;}catch(e){cross++;}}
 return{docs:out,cross:cross};}
@@ -93,7 +102,7 @@ if(rows3.length)merge(hs,rows3,imgs3);}}
 function totalRows(){var n=0;for(var k in state.acc)n+=state.acc[k].order.length;return n;}
 function updateBadge(){var el=document.getElementById('__edgecapbadge');if(!el)return;
 el.innerHTML='&#9210; <b>Edge Capture recording</b><br>'+totalRows()+' table row(s) · '+state.reqs.length+' API · '+state.ws.length+' stream msg(s)<br>Open your trade log AND click into individual trades so their fills load, then <u>click here to finish</u>.';}
-function runScan(){var d=docsList();for(var i=0;i<d.docs.length;i++){try{scanDoc(d.docs[i],mergeTable);}catch(e){}}state.lastCross=d.cross;state.scans++;updateBadge();}
+function runScan(){hookFrames();var d=docsList();for(var i=0;i<d.docs.length;i++){try{scanDoc(d.docs[i],mergeTable);}catch(e){}}state.lastCross=d.cross;state.scans++;updateBadge();}
 var timer=setInterval(runScan,800);
 runScan();
 function finish(){var w=window.__edgeCap;if(w&&w.done)return;if(w)w.done=true;
@@ -108,9 +117,9 @@ var accRows=0;for(var ti0=0;ti0<tbls.length;ti0++)accRows+=tbls[ti0].rows.length
 var diag={tables:document.querySelectorAll('table').length,ariaGrids:document.querySelectorAll('[role=table],[role=grid]').length,
 iframes:document.querySelectorAll('iframe').length,crossOriginFrames:state.lastCross||0,canvases:document.querySelectorAll('canvas').length,
 flutter:!!(window._flutter||window.flutterCanvasKit),react:!!document.querySelector('[data-reactroot],#root,#app'),
-jsonResponses:state.reqs.length,wsFrames:state.ws.length,scans:state.scans,accumulatedTables:tbls.length,accumulatedRows:accRows,
+jsonResponses:state.reqs.length,wsFrames:state.ws.length,realmsHooked:state.hooked,scans:state.scans,accumulatedTables:tbls.length,accumulatedRows:accRows,
 textSample:(document.body?document.body.innerText:'').replace(/\\s+/g,' ').slice(0,1500)};
-var payload={source:'edge-capture',version:4,url:location.href,title:document.title,capturedAt:new Date().toISOString(),
+var payload={source:'edge-capture',version:5,url:location.href,title:document.title,capturedAt:new Date().toISOString(),
 tables:tbls,requests:state.reqs,ws:state.ws,diagnostics:diag};
 var el=document.getElementById('__edgecapbadge');if(el)el.remove();
 var doDl=function(){var s=JSON.stringify(payload);
@@ -123,7 +132,7 @@ window.__edgeCap=null;};
 var pend=0,cnt=0,fin2=false,MAX=60;var done2=function(){if(fin2)return;fin2=true;doDl();};
 for(var ti=0;ti<tbls.length;ti++){var rims=tbls[ti].rowImages||[];
 for(var ii=0;ii<rims.length;ii++){(function(rec){if(cnt>=MAX)return;cnt++;pend++;
-(OF||window.fetch)(rec.src).then(function(r){return r.blob();}).then(function(bl){return new Promise(function(res){var fr=new FileReader();fr.onload=function(){res(fr.result);};fr.readAsDataURL(bl);});}).then(function(du){rec.dataUrl=du;}).catch(function(){}).then(function(){pend--;if(pend<=0)done2();});})(rims[ii]);}}
+(OFETCH||window.fetch)(rec.src).then(function(r){return r.blob();}).then(function(bl){return new Promise(function(res){var fr=new FileReader();fr.onload=function(){res(fr.result);};fr.readAsDataURL(bl);});}).then(function(du){rec.dataUrl=du;}).catch(function(){}).then(function(){pend--;if(pend<=0)done2();});})(rims[ii]);}}
 if(pend<=0)done2();}
 window.__edgeCap={finish:finish,done:false};
 var bg=document.createElement('div');bg.id='__edgecapbadge';
