@@ -1,48 +1,49 @@
 /**
- * The "Edge Capture" bookmarklet v3 — runs inside the logged-in platform
- * page (Trader One or any web journal) and captures trade data three ways
- * at once, continuously, so it survives the two failure modes that break a
- * one-shot capture:
+ * The "Edge Capture" bookmarklet v4 — runs inside the logged-in platform
+ * page (Trader One or any web journal) and captures trade data every way
+ * it can, continuously, for the whole recording session:
  *
- *  1. NETWORK RECORDING — intercepts the JSON responses the page itself
- *     downloads (fetch + XHR). Works even when the app renders to canvas
- *     and has no readable DOM at all.
+ *  1. NETWORK — wraps fetch AND XMLHttpRequest AND WebSocket. Every JSON-
+ *     shaped response the page downloads, and every text frame streamed
+ *     over a WebSocket opened after recording starts, is recorded. (Trading
+ *     platforms stream positions/orders/fills over WebSocket, and load a
+ *     trade's individual fills on demand when you open it — so the recorder
+ *     must catch on-interaction traffic, not just the initial page load.)
  *  2. DOM tables — native <table> and ARIA role=table/grid React grids,
  *     including same-origin iframes.
- *  3. Div-grids — a header-row heuristic for custom grids built from plain
- *     divs/spans (no ARIA roles), with a broad, substring-based keyword
- *     match so near-miss header text ("Net P&L ($)", "Sub-Tag") still hits.
+ *  3. Div-grids — a header-row heuristic for custom grids built from divs.
  *
- * Crucially, (2) and (3) run on a ~800ms timer for as long as recording is
- * on, and every pass MERGES newly-seen rows into an accumulator keyed by
- * row content — so a virtualized/infinite-scroll grid (which only ever
- * renders the rows currently in view) gets captured in full as the user
- * scrolls, instead of only whatever happened to be visible at the final
- * instant. The gold badge shows a live row count so a stuck capture is
- * obvious immediately, instead of only failing silently on import.
+ * (2) and (3) re-scan on an 800ms timer and MERGE newly-seen rows into an
+ * accumulator, so virtualized/expandable views are captured as you scroll
+ * or open trades. The gold badge shows live counts so a stuck capture is
+ * obvious. It NEVER clicks anything itself — on a live trading platform,
+ * only the trader touches the controls.
  *
- * The capture file also embeds diagnostics (framework hints, element
- * counts, a text sample) so unsupported layouts can be debugged from the
- * file alone. Everything runs in the user's own browser session — no
- * credentials or data are sent anywhere.
+ * Everything runs in the user's own browser session — no credentials or
+ * data are sent anywhere.
  */
 const SRC = `(function(){try{
 if(window.__edgeCap){window.__edgeCap.finish();return;}
 var SEP=String.fromCharCode(1);
 function txt(el){return ((el&&el.innerText)||'').replace(/\\s+/g,' ').trim();}
-var state={reqs:[],acc:{},scans:0};
+var state={reqs:[],ws:[],acc:{},scans:0};
+function looksJson(s){if(!s)return false;var t=s.replace(/^\\uFEFF/,'').trimStart();return t.charAt(0)==='{'||t.charAt(0)==='[';}
 var OF=window.fetch;
 if(OF){window.fetch=function(){var a=arguments;var u=(typeof a[0]==='string')?a[0]:((a[0]&&a[0].url)||'');var p=OF.apply(this,a);
-p.then(function(r){try{var ct=(r.headers&&r.headers.get('content-type'))||'';if(ct.indexOf('json')<0)return;
-r.clone().text().then(function(s){if(s&&s.length<3000000&&state.reqs.length<120)state.reqs.push({url:String(u),body:s});}).catch(function(){});}catch(e){}}).catch(function(){});
+p.then(function(r){try{r.clone().text().then(function(s){if(looksJson(s)&&s.length<4000000&&state.reqs.length<400)state.reqs.push({url:String(u),body:s});}).catch(function(){});}catch(e){}}).catch(function(){});
 return p;};}
 var OO=XMLHttpRequest.prototype.open,OS=XMLHttpRequest.prototype.send;
 XMLHttpRequest.prototype.open=function(m,u){this.__ec=String(u||'');return OO.apply(this,arguments);};
 XMLHttpRequest.prototype.send=function(){var x=this;x.addEventListener('load',function(){try{
-var ct=x.getResponseHeader('content-type')||'';if(ct.indexOf('json')<0)return;
 var s=(x.responseType===''||x.responseType==='text')?x.responseText:(x.responseType==='json'?JSON.stringify(x.response):'');
-if(s&&s.length<3000000&&state.reqs.length<120)state.reqs.push({url:x.__ec||'',body:s});}catch(e){}});
+if(looksJson(s)&&s.length<4000000&&state.reqs.length<400)state.reqs.push({url:x.__ec||'',body:s});}catch(e){}});
 return OS.apply(this,arguments);};
+try{var OWS=window.WebSocket;
+if(OWS){var NWS=function(url,protos){var ws=(arguments.length>1)?new OWS(url,protos):new OWS(url);
+try{ws.addEventListener('message',function(ev){try{var d=ev.data;if(typeof d==='string'&&d.length<2000000&&state.ws.length<2000)state.ws.push({url:String(url),body:d});}catch(e){}});}catch(e){}
+return ws;};
+NWS.prototype=OWS.prototype;NWS.CONNECTING=OWS.CONNECTING;NWS.OPEN=OWS.OPEN;NWS.CLOSING=OWS.CLOSING;NWS.CLOSED=OWS.CLOSED;
+try{window.WebSocket=NWS;}catch(e){}}}catch(e){}
 function docsList(){var out=[document],cross=0,ifr=document.querySelectorAll('iframe');
 for(var i=0;i<ifr.length;i++){try{var d=ifr[i].contentDocument;if(d&&d.body)out.push(d);else cross++;}catch(e){cross++;}}
 return{docs:out,cross:cross};}
@@ -58,7 +59,7 @@ var key=rows[r].join(SEP);
 if(!(key in entry.rowMap)){if(entry.order.length<8000){entry.rowMap[key]=rows[r];entry.order.push(key);}}
 if(imgByRow[r]){if(!entry.imgMap[key])entry.imgMap[key]=[];
 for(var ii=0;ii<imgByRow[r].length;ii++){var src=imgByRow[r][ii];if(entry.imgMap[key].indexOf(src)<0)entry.imgMap[key].push(src);}}}}
-var HW=/date|day|time|open|close|entry|exit|qty|quantity|size|side|direction|symbol|inst|market|contract|ticker|p&l|pnl|profit|net|gross|result|outcome|amount|tag|category|note|description|comment|risk|account|duration|strategy|setup|win|loss|video|link/i;
+var HW=/date|day|time|open|close|entry|exit|qty|quantity|size|side|direction|symbol|inst|market|contract|ticker|p&l|pnl|profit|net|gross|result|outcome|amount|tag|category|note|description|comment|risk|account|duration|strategy|setup|win|loss|video|link|fill|order|price|avg|status/i;
 function scanDoc(doc,merge){
 var tables=doc.querySelectorAll('table');
 for(var i=0;i<tables.length;i++){var t=tables[i];var hr=(t.tHead&&t.tHead.rows[0])||t.rows[0];if(!hr)continue;
@@ -81,9 +82,9 @@ for(var q=0;q<cand.length&&q<20000;q++){var e=cand[q];if(e.children.length)conti
 if(tv&&tv.length<26&&HW.test(tv)){var pp=e.parentElement;if(!pp)continue;
 var f=null;for(var b2=0;b2<byParent.length;b2++)if(byParent[b2].p===pp){f=byParent[b2];break;}
 if(!f){f={p:pp,n:0};byParent.push(f);}f.n++;}}
-for(var w=0;w<byParent.length;w++){if(byParent[w].n<4)continue;var head=byParent[w].p;var cont=head.parentElement;if(!cont)continue;
+for(var w=0;w<byParent.length;w++){if(byParent[w].n<3)continue;var head=byParent[w].p;var cont=head.parentElement;if(!cont)continue;
 var hs=[];for(var hc=0;hc<head.children.length;hc++)hs.push(txt(head.children[hc]));
-if(hs.length<4)continue;var rows3=[],imgs3=[];
+if(hs.length<3)continue;var rows3=[],imgs3=[];
 for(var rc=0;rc<cont.children.length;rc++){var ch=cont.children[rc];if(ch===head)continue;
 if(ch.children.length<2)continue;var cs3=[];for(var cc=0;cc<ch.children.length;cc++)cs3.push(txt(ch.children[cc]));
 if(!cs3.some(function(x){return x;}))continue;var ri3=rows3.length;rows3.push(cs3);
@@ -91,8 +92,7 @@ var ims3=ch.querySelectorAll('img');for(var k3=0;k3<ims3.length;k3++)if(ims3[k3]
 if(rows3.length)merge(hs,rows3,imgs3);}}
 function totalRows(){var n=0;for(var k in state.acc)n+=state.acc[k].order.length;return n;}
 function updateBadge(){var el=document.getElementById('__edgecapbadge');if(!el)return;
-var n=totalRows();
-el.innerHTML='&#9210; <b>Edge Capture recording</b><br>'+n+' row(s) + '+state.reqs.length+' API response(s) captured.<br>Scroll through your trade log so every row loads, then <u>click here to finish</u>.';}
+el.innerHTML='&#9210; <b>Edge Capture recording</b><br>'+totalRows()+' table row(s) · '+state.reqs.length+' API · '+state.ws.length+' stream msg(s)<br>Open your trade log AND click into individual trades so their fills load, then <u>click here to finish</u>.';}
 function runScan(){var d=docsList();for(var i=0;i<d.docs.length;i++){try{scanDoc(d.docs[i],mergeTable);}catch(e){}}state.lastCross=d.cross;state.scans++;updateBadge();}
 var timer=setInterval(runScan,800);
 runScan();
@@ -108,17 +108,17 @@ var accRows=0;for(var ti0=0;ti0<tbls.length;ti0++)accRows+=tbls[ti0].rows.length
 var diag={tables:document.querySelectorAll('table').length,ariaGrids:document.querySelectorAll('[role=table],[role=grid]').length,
 iframes:document.querySelectorAll('iframe').length,crossOriginFrames:state.lastCross||0,canvases:document.querySelectorAll('canvas').length,
 flutter:!!(window._flutter||window.flutterCanvasKit),react:!!document.querySelector('[data-reactroot],#root,#app'),
-jsonResponses:state.reqs.length,scans:state.scans,accumulatedTables:tbls.length,accumulatedRows:accRows,
+jsonResponses:state.reqs.length,wsFrames:state.ws.length,scans:state.scans,accumulatedTables:tbls.length,accumulatedRows:accRows,
 textSample:(document.body?document.body.innerText:'').replace(/\\s+/g,' ').slice(0,1500)};
-var payload={source:'edge-capture',version:3,url:location.href,title:document.title,capturedAt:new Date().toISOString(),
-tables:tbls,requests:state.reqs,diagnostics:diag};
+var payload={source:'edge-capture',version:4,url:location.href,title:document.title,capturedAt:new Date().toISOString(),
+tables:tbls,requests:state.reqs,ws:state.ws,diagnostics:diag};
 var el=document.getElementById('__edgecapbadge');if(el)el.remove();
 var doDl=function(){var s=JSON.stringify(payload);
 try{var b=new Blob([s],{type:'application/json'});var a=document.createElement('a');
 a.href=URL.createObjectURL(b);a.download='edge-capture-'+new Date().toISOString().slice(0,10)+'.json';
 document.body.appendChild(a);a.click();a.remove();}catch(e){}
 try{var cp=navigator.clipboard.writeText(s);if(cp&&cp.catch)cp.catch(function(){});}catch(e){}
-alert('Edge Capture finished: '+accRows+' row(s) across '+tbls.length+' table(s), plus '+state.reqs.length+' JSON response(s). The file was downloaded (and copied to the clipboard) - import it in Edge Intelligence. If it shows no trades, import it anyway: it embeds diagnostics that help tune the extractor, and the app will show them to you.');
+alert('Edge Capture finished: '+accRows+' table row(s), '+state.reqs.length+' API response(s), '+state.ws.length+' stream message(s). File downloaded (and copied to clipboard) - import it in Edge Intelligence. To get per-fill detail you must OPEN individual trades while recording so their fills load.');
 window.__edgeCap=null;};
 var pend=0,cnt=0,fin2=false,MAX=60;var done2=function(){if(fin2)return;fin2=true;doDl();};
 for(var ti=0;ti<tbls.length;ti++){var rims=tbls[ti].rowImages||[];
@@ -127,7 +127,7 @@ for(var ii=0;ii<rims.length;ii++){(function(rec){if(cnt>=MAX)return;cnt++;pend++
 if(pend<=0)done2();}
 window.__edgeCap={finish:finish,done:false};
 var bg=document.createElement('div');bg.id='__edgecapbadge';
-bg.style.cssText='position:fixed;top:12px;right:12px;z-index:2147483647;background:#c9a227;color:#141210;font:600 13px/1.4 system-ui,sans-serif;padding:10px 16px;border-radius:9px;cursor:pointer;box-shadow:0 6px 22px rgba(0,0,0,.45);max-width:290px';
+bg.style.cssText='position:fixed;top:12px;right:12px;z-index:2147483647;background:#c9a227;color:#141210;font:600 13px/1.4 system-ui,sans-serif;padding:10px 16px;border-radius:9px;cursor:pointer;box-shadow:0 6px 22px rgba(0,0,0,.45);max-width:300px';
 bg.onclick=finish;
 if(document.body)document.body.appendChild(bg);
 updateBadge();
