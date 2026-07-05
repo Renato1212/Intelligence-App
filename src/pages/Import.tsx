@@ -174,14 +174,16 @@ export default function ImportPage() {
             </li>
             <li>
               <b>Record:</b> log in to Trader One and click the bookmark <b>first</b> — a gold “recording” badge
-              appears. Then open your trade log / journal pages (expand the date range, scroll through everything you
-              want) so the data loads while it records.
+              appears showing live counts of table rows, API responses and stream messages. Then open your trade log
+              / journal and scroll through everything so every row loads.
             </li>
             <li>
-              <b>For scale-in/out detail:</b> while still recording, <b>click into a few individual trades</b> to
-              open their detail — Trader One loads the individual fills (exact size, price, time and market/limit
-              type) only when you view a trade, and the recorder captures them as it happens. Do this for any trades
-              whose execution breakdown you want to study.
+              <b>For scale-in/out detail (important):</b> the trade log only holds the <i>averaged</i> entry/exit.
+              The individual fills load only when you <b>open a trade</b>, so while still recording{' '}
+              <b>click into each trade</b> whose breakdown you want — the recorder now captures both the on-click API
+              calls and the live WebSocket stream (which is how Trader One sends fills). Watch the badge's “stream
+              msg(s)” and “API” counts climb as you open trades; if they stay at 0 when you open a trade, tell me and
+              share the file.
             </li>
             <li>
               <b>Finish:</b> click the gold badge — the <span className="mono">edge-capture.json</span> downloads.

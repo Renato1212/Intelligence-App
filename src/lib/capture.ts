@@ -25,6 +25,8 @@ export interface CapturePayload {
   }[];
   /** v2+: JSON API responses recorded while the user browsed the platform */
   requests?: { url: string; body: string }[];
+  /** v4: text frames streamed over WebSocket (positions/orders/fills) */
+  ws?: { url: string; body: string }[];
   /** v2+: page structure hints for debugging unsupported layouts */
   diagnostics?: {
     tables?: number;
@@ -34,6 +36,8 @@ export interface CapturePayload {
     canvases?: number;
     flutter?: boolean;
     jsonResponses?: number;
+    /** v4: number of WebSocket text frames captured */
+    wsFrames?: number;
     /** v3: how many scan passes ran while recording (~1 per 800ms) */
     scans?: number;
     /** v3: distinct header signatures / total rows accumulated across all scans */
@@ -195,6 +199,28 @@ function findTime(flat: Record<string, unknown>, dateHint?: string): string | nu
   return null;
 }
 
+/**
+ * Find the order type (market/limit/stop) by shape. Field names vary and a
+ * greedy 'type' needle would wrongly grab an unrelated wrapper key such as a
+ * message envelope's `type: "fill"`. So we scan every string value and return
+ * the first that actually NORMALIZES to a real order type, preferring keys
+ * whose name explicitly hints at order type.
+ */
+function findOrderType(flat: Record<string, unknown>): import('../domain/types').OrderType {
+  const named: unknown[] = [];
+  const rest: unknown[] = [];
+  for (const [k, v] of Object.entries(flat)) {
+    if (typeof v !== 'string' || !v.trim()) continue;
+    if (/(ordertype|ordkind|order_type|ordtype)/.test(k)) named.push(v);
+    else if (k.includes('type') || k.includes('kind')) rest.push(v);
+  }
+  for (const v of [...named, ...rest]) {
+    const t = normalizeOrderType(v as string);
+    if (t !== 'unknown') return t;
+  }
+  return 'unknown';
+}
+
 /** Does this object look like a single fill (not a completed round-trip trade)? */
 function looksLikeFill(flat: Record<string, unknown>): boolean {
   // a completed trade has a pnl, or both an entry and an exit price → not a fill
@@ -219,11 +245,10 @@ function fillFromObject(raw: Record<string, unknown>, dateHint?: string): { inst
   const time = findTime(flat, dateHint);
   if (!time || !qtySigned) return null;
   const action: 'BUY' | 'SELL' = findSide(flat) ?? (qtySigned < 0 ? 'SELL' : 'BUY');
-  const typeRaw = fuzzy(flat, ['ordertype', 'ordkind', 'type']);
   const symRaw = fuzzy(flat, ['symbol', 'instrument', 'contract', 'product', 'ticker', 'market', 'sym']);
   return {
     instrument: typeof symRaw === 'string' && symRaw.trim() && symRaw.length <= 24 ? symbolRoot(symRaw.trim()) : null,
-    exec: { time, action, qty: Math.abs(qtySigned), price, orderType: normalizeOrderType(typeof typeRaw === 'string' ? typeRaw : null) },
+    exec: { time, action, qty: Math.abs(qtySigned), price, orderType: findOrderType(flat) },
   };
 }
 
@@ -238,31 +263,48 @@ function arrayLooksLikeFills(arr: Record<string, unknown>[]): boolean {
 
 const execKey = (e: Execution) => [e.time, e.action, e.qty, e.price].join('|');
 
-/** Attach pooled executions to trades by instrument + time window (entry −15m … exit +5m). */
+/**
+ * Attach pooled executions to trades. Each fill is assigned to at most ONE
+ * trade — the one whose [entry, exit] window best contains it — so that
+ * back-to-back trades on the same instrument (whose padded windows overlap)
+ * never double-count a boundary fill.
+ */
+const FILL_TOL_MS = 5 * 60000; // candidacy padding on each side of the trade window
 function attachExecutions(items: CaptureItem[], pool: { instrument: string; exec: Execution }[]): void {
   if (!pool.length) return;
-  const byInst = new Map<string, Execution[]>();
+  // Index trades by instrument, preserving their position in `items`.
+  const tradesByInst = new Map<string, { item: CaptureItem; start: number; end: number }[]>();
+  for (const item of items) {
+    const inst = item.trade.instrument;
+    if (!tradesByInst.has(inst)) tradesByInst.set(inst, []);
+    tradesByInst.get(inst)!.push({
+      item,
+      start: new Date(item.trade.entryTime).getTime(),
+      end: new Date(item.trade.exitTime).getTime(),
+    });
+  }
   for (const p of pool) {
-    if (!byInst.has(p.instrument)) byInst.set(p.instrument, []);
-    byInst.get(p.instrument)!.push(p.exec);
+    const candidates = tradesByInst.get(p.instrument);
+    if (!candidates) continue;
+    const t = new Date(p.exec.time).getTime();
+    if (!Number.isFinite(t)) continue;
+    // Score each candidate: 0 when the fill falls inside [entry, exit];
+    // otherwise the distance to the nearest edge (only within FILL_TOL_MS).
+    let best: { item: CaptureItem; score: number } | null = null;
+    for (const c of candidates) {
+      let score: number;
+      if (t >= c.start && t <= c.end) score = 0;
+      else if (t < c.start && c.start - t <= FILL_TOL_MS) score = c.start - t;
+      else if (t > c.end && t - c.end <= FILL_TOL_MS) score = t - c.end;
+      else continue;
+      if (!best || score < best.score) best = { item: c.item, score };
+    }
+    if (!best) continue;
+    const seen = new Set(best.item.executions.map(execKey));
+    if (!seen.has(execKey(p.exec))) best.item.executions.push(p.exec);
   }
   for (const item of items) {
-    const group = byInst.get(item.trade.instrument);
-    if (!group) continue;
-    const start = new Date(item.trade.entryTime).getTime() - 15 * 60000;
-    const end = new Date(item.trade.exitTime).getTime() + 5 * 60000;
-    const matched = group.filter((e) => {
-      const t = new Date(e.time).getTime();
-      return t >= start && t <= end;
-    });
-    if (!matched.length) continue;
-    const seenExecs = new Set(item.executions.map(execKey));
-    for (const e of matched) {
-      if (!seenExecs.has(execKey(e))) {
-        seenExecs.add(execKey(e));
-        item.executions.push(e);
-      }
-    }
+    if (!item.executions.length) continue;
     item.executions.sort((a, b) => a.time.localeCompare(b.time));
     if (item.executions.length > 60) item.executions = item.executions.slice(0, 60);
   }
@@ -470,37 +512,79 @@ function objectToItem(raw: Record<string, unknown>): CaptureItem | null {
   return { trade: t, images: [], imageLinks, executions };
 }
 
-function itemsFromRequests(requests: { url: string; body: string }[]): {
+/**
+ * Parse one captured body into JSON values. Handles a plain JSON document,
+ * and newline-delimited JSON (common for WebSocket streams that batch many
+ * messages, or a log of frames concatenated together).
+ */
+function parseBodies(body: string): unknown[] {
+  const out: unknown[] = [];
+  try {
+    out.push(JSON.parse(body));
+    return out;
+  } catch {
+    // fall through to line-by-line
+  }
+  for (const line of body.split(/\r?\n/)) {
+    const t = line.trim();
+    if (!t || (t[0] !== '{' && t[0] !== '[')) continue;
+    try {
+      out.push(JSON.parse(t));
+    } catch {
+      // skip unparseable frame
+    }
+  }
+  return out;
+}
+
+/** Recursively find single objects that look like a fill (not inside an array already handled). */
+function collectFillObjects(node: unknown, out: Record<string, unknown>[], depth = 0): void {
+  if (depth > 6 || node == null) return;
+  if (Array.isArray(node)) {
+    for (const x of node.slice(0, 200)) collectFillObjects(x, out, depth + 1);
+  } else if (typeof node === 'object') {
+    const obj = node as Record<string, unknown>;
+    if (fillFromObject(obj)) out.push(obj);
+    for (const v of Object.values(obj)) collectFillObjects(v, out, depth + 1);
+  }
+}
+
+/** Mine captured API responses / WebSocket frames for trades and fills. */
+function itemsFromRequests(sources: { url: string; body: string }[]): {
   items: CaptureItem[];
   execPool: { instrument: string; exec: Execution }[];
 } {
   const items: CaptureItem[] = [];
   const execPool: { instrument: string; exec: Execution }[] = [];
-  for (const req of requests) {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(req.body);
-    } catch {
-      continue;
-    }
-    const arrays: Record<string, unknown>[][] = [];
-    collectArrays(parsed, arrays);
-    for (const arr of arrays) {
-      const converted = arr.map(objectToItem).filter((x): x is CaptureItem => x != null);
-      // only trust arrays where most objects look like trades — filters out
-      // config lists, watchlists, user settings etc.
-      if (converted.length && converted.length >= arr.length * 0.5) {
-        items.push(...converted);
-        continue;
-      }
-      // not trades — maybe an order-history / executions/fills array. Detect
-      // by shape so field naming doesn't matter, and require an instrument so
-      // the fills can be matched back to a trade.
-      if (arrayLooksLikeFills(arr)) {
-        for (const o of arr) {
-          const f = fillFromObject(o);
-          if (f && f.instrument) execPool.push({ instrument: f.instrument, exec: f.exec });
+  const pushFill = (o: unknown) => {
+    const f = fillFromObject(o as Record<string, unknown>);
+    if (f && f.instrument) execPool.push({ instrument: f.instrument, exec: f.exec });
+  };
+  for (const req of sources) {
+    for (const parsed of parseBodies(req.body)) {
+      const arrays: Record<string, unknown>[][] = [];
+      collectArrays(parsed, arrays);
+      let usedAsTrades = false;
+      for (const arr of arrays) {
+        const converted = arr.map(objectToItem).filter((x): x is CaptureItem => x != null);
+        // only trust arrays where most objects look like trades — filters out
+        // config lists, watchlists, user settings etc.
+        if (converted.length && converted.length >= arr.length * 0.5) {
+          items.push(...converted);
+          usedAsTrades = true;
+          continue;
         }
+        // not trades — maybe an order-history / executions/fills array. Detect
+        // by shape so field naming doesn't matter, and require an instrument so
+        // the fills can be matched back to a trade.
+        if (arrayLooksLikeFills(arr)) for (const o of arr) pushFill(o);
+      }
+      // single-fill messages (a WebSocket often streams one fill per frame,
+      // or nests a fill inside an event wrapper) — catch those too.
+      if (!usedAsTrades) {
+        const singles: Record<string, unknown>[] = [];
+        collectFillObjects(parsed, singles);
+        for (const o of singles) pushFill(o);
       }
     }
   }
@@ -560,15 +644,18 @@ export function parseCapture(text: string): CaptureParseResult {
     });
   }
 
-  // v2: trades recorded from the page's own JSON API traffic
-  if (payload.requests?.length) {
-    const fromReqs = itemsFromRequests(payload.requests);
-    for (const item of fromReqs.items) {
+  // trades & fills recorded from the page's own JSON traffic — both the
+  // REST responses (fetch/XHR) and the WebSocket frames (positions/orders/
+  // fills stream over WS on live trading platforms)
+  const networkSources = [...(payload.requests ?? []), ...(payload.ws ?? [])];
+  if (networkSources.length) {
+    const fromNet = itemsFromRequests(networkSources);
+    for (const item of fromNet.items) {
       if (item.trade.importKey && seen.has(item.trade.importKey)) continue;
       if (item.trade.importKey) seen.add(item.trade.importKey);
       items.push(item);
     }
-    for (const e of fromReqs.execPool) {
+    for (const e of fromNet.execPool) {
       const k = e.instrument + '|' + execKey(e.exec);
       if (!seenPool.has(k)) {
         seenPool.add(k);
@@ -634,24 +721,31 @@ export function parseCapture(text: string): CaptureParseResult {
 
   const fillsFound = items.reduce((s, i) => s + i.executions.length, 0);
   // when no fills came through, surface the structure of every captured JSON
-  // array so the execution data can be seen (and mapped if the detector missed)
+  // object/array (REST + WebSocket) so the execution data can be seen — and
+  // mapped if the shape detector missed it.
   const structureSamples: CaptureParseResult['structureSamples'] = [];
   if (!fillsFound) {
-    for (const req of payload.requests ?? []) {
-      if (structureSamples.length >= 8) break;
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(req.body);
-      } catch {
-        continue;
-      }
-      const arrays: Record<string, unknown>[][] = [];
-      collectArrays(parsed, arrays);
-      for (const arr of arrays) {
-        if (structureSamples.length >= 8) break;
-        if (arr[0] && typeof arr[0] === 'object') {
-          structureSamples.push({ url: req.url.slice(0, 120), keys: Object.keys(flatten(arr[0])), sampleRow: arr[0] });
-        }
+    const netSources = [
+      ...(payload.requests ?? []).map((r) => ({ ...r, kind: 'API' })),
+      ...(payload.ws ?? []).map((r) => ({ ...r, kind: 'WS' })),
+    ];
+    const seenKeySigs = new Set<string>();
+    const addSample = (url: string, obj: Record<string, unknown>) => {
+      if (structureSamples.length >= 12) return;
+      const keys = Object.keys(flatten(obj));
+      const sig = keys.slice().sort().join(',');
+      if (seenKeySigs.has(sig) || keys.length < 2) return;
+      seenKeySigs.add(sig);
+      structureSamples.push({ url: url.slice(0, 120), keys, sampleRow: obj });
+    };
+    for (const src of netSources) {
+      if (structureSamples.length >= 12) break;
+      for (const parsed of parseBodies(src.body)) {
+        const arrays: Record<string, unknown>[][] = [];
+        collectArrays(parsed, arrays);
+        for (const arr of arrays) if (arr[0] && typeof arr[0] === 'object') addSample(`${src.kind} ${src.url}`, arr[0]);
+        // also sample a single-object frame (WS often streams one record)
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) addSample(`${src.kind} ${src.url}`, parsed as Record<string, unknown>);
       }
     }
   }
