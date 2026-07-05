@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { PnL, SideBadge, useToast } from '../components/ui';
 import type { Trade } from '../domain/types';
 import { bookmarkletCode, bookmarkletHref } from '../lib/bookmarklet';
-import { CaptureError, importCapture, isCapturePayload, parseCapture, type CaptureDiagnostics, type CaptureParseResult } from '../lib/capture';
+import { attachExecutionsToTrades, CaptureError, importCapture, isCapturePayload, parseCapture, type CaptureDiagnostics, type CaptureParseResult } from '../lib/capture';
 import { db } from '../lib/db';
 import { fmtDate, fmtMoney, fmtTime } from '../lib/format';
 import { importCSV, type ImportResult } from '../lib/importers';
@@ -71,6 +71,23 @@ export default function ImportPage() {
     setResult(null);
     toast(`Imported ${fresh.length} trades${dupes ? ` (${dupes} duplicates skipped)` : ''}`);
     if (fresh.length) nav('/trades');
+  };
+
+  // Attach the fills from a broker export to trades already in the journal
+  // (e.g. a Trader One import) by time-matching — keeps their tags, adds the
+  // scale-in/out ladder. Reliable per-fill detail without scraping the platform.
+  const attachFillsToExisting = async () => {
+    if (!result?.executionPool?.length) return;
+    setBusy(true);
+    const res = await attachExecutionsToTrades(result.executionPool);
+    setBusy(false);
+    setResult(null);
+    if (res.enriched) {
+      toast(`Attached ${res.attached} fills to ${res.enriched} existing trades${res.unmatched ? ` · ${res.unmatched} unmatched` : ''}`);
+      nav('/trades');
+    } else {
+      toast(`No existing trades matched these fills${res.unmatched ? ` (${res.unmatched} fills had no matching trade — import their trades first)` : ''}`);
+    }
   };
 
   return (
@@ -178,12 +195,11 @@ export default function ImportPage() {
               / journal and scroll through everything so every row loads.
             </li>
             <li>
-              <b>For scale-in/out detail (important):</b> the trade log only holds the <i>averaged</i> entry/exit.
-              The individual fills load only when you <b>open a trade</b>, so while still recording{' '}
-              <b>click into each trade</b> whose breakdown you want — the recorder now captures both the on-click API
-              calls and the live WebSocket stream (which is how Trader One sends fills). Watch the badge's “stream
-              msg(s)” and “API” counts climb as you open trades; if they stay at 0 when you open a trade, tell me and
-              share the file.
+              <b>For scale-in/out detail:</b> the trade log only holds the <i>averaged</i> entry/exit. The individual
+              fills load only when you <b>open a trade</b>, so while still recording <b>click into each trade</b> whose
+              breakdown you want. The recorder now hooks the network <i>inside Trader One's app frames</i> — where its
+              WebSocket stream and fill requests actually live — not just the outer page. Watch the badge's “stream
+              msg(s)” and “API” counts climb as you open trades; if they stay at 0, share the file and I'll tune it.
             </li>
             <li>
               <b>Finish:</b> click the gold badge — the <span className="mono">edge-capture.json</span> downloads.
@@ -191,6 +207,14 @@ export default function ImportPage() {
               diagnostics that let the extractor be tuned for the exact page layout.
             </li>
           </ol>
+          <div className="small" style={{ background: 'var(--surface-2, rgba(201,162,39,.08))', borderRadius: 8, padding: '10px 12px', lineHeight: 1.5 }}>
+            <b>Most reliable route for exact fills →</b> export your <b>executions / fills report from your broker</b>{' '}
+            (the platform Trader One connects to — Rithmic R&nbsp;Trader Pro, CQG, etc. all offer a Fills/Order-History
+            CSV). Drop that CSV here: it has <i>every</i> fill with exact size, price, time and market/limit type. You
+            can then <b>“Attach fills to existing trades”</b> to add the scale-in/out ladder to the trades you already
+            imported from Trader One — matched by instrument and time, keeping all their tags. This works regardless of
+            what Trader One's own page exposes.
+          </div>
           <div className="row">
             <button className="btn sm" onClick={() => setPasteOpen(!pasteOpen)}>
               {pasteOpen ? 'Hide paste box' : 'Paste capture JSON instead…'}
@@ -409,11 +433,23 @@ export default function ImportPage() {
                 <button className="btn" onClick={() => setResult(null)}>
                   Cancel
                 </button>
+                {result.format === 'fills' && !!result.executionPool?.length && (
+                  <button className="btn" disabled={busy} onClick={attachFillsToExisting} title="Match these fills to trades already in your journal by instrument + time, keeping their tags">
+                    {busy ? 'Attaching…' : 'Attach fills to existing trades'}
+                  </button>
+                )}
                 <button className="btn primary" disabled={busy} onClick={confirmImport}>
                   {busy ? 'Importing…' : `Import ${result.trades.length} trades`}
                 </button>
               </div>
             </div>
+            {result.format === 'fills' && !!result.executionPool?.length && (
+              <div className="small muted" style={{ marginBottom: 10 }}>
+                This is a fills export ({result.executionPool.length} executions). <b>Import {result.trades.length} trades</b> creates
+                fresh round-trip trades with full ladders, or <b>Attach fills to existing trades</b> adds the scale-in/out detail to
+                trades already in your journal (e.g. a Trader One import) — matched by instrument and time, keeping their tags.
+              </div>
+            )}
             {result.warnings.length > 0 && (
               <div className="small" style={{ color: 'var(--dom-news)', marginBottom: 10 }}>
                 {result.warnings.slice(0, 5).map((w, i) => (

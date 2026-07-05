@@ -270,38 +270,48 @@ const execKey = (e: Execution) => [e.time, e.action, e.qty, e.price].join('|');
  * never double-count a boundary fill.
  */
 const FILL_TOL_MS = 5 * 60000; // candidacy padding on each side of the trade window
+
+/** How well a fill at time `t` fits a trade window: 0 = inside, else edge distance (null = out of range). */
+function scoreFillWindow(t: number, start: number, end: number): number | null {
+  if (!Number.isFinite(t) || !Number.isFinite(start) || !Number.isFinite(end)) return null;
+  if (t >= start && t <= end) return 0;
+  if (t < start && start - t <= FILL_TOL_MS) return start - t;
+  if (t > end && t - end <= FILL_TOL_MS) return t - end;
+  return null;
+}
+
+/**
+ * Pick the single best trade for a fill: same instrument, whose [entry, exit]
+ * window best contains it. Returns the trade's index, or -1 if none fit.
+ */
+export function assignFillToTrade(
+  exec: Execution,
+  instrument: string,
+  trades: { instrument: string; entryTime: string; exitTime: string }[],
+): number {
+  const t = new Date(exec.time).getTime();
+  let bestIdx = -1;
+  let bestScore = Infinity;
+  for (let i = 0; i < trades.length; i++) {
+    if (trades[i].instrument !== instrument) continue;
+    const s = scoreFillWindow(t, new Date(trades[i].entryTime).getTime(), new Date(trades[i].exitTime).getTime());
+    if (s == null) continue;
+    if (s < bestScore) {
+      bestScore = s;
+      bestIdx = i;
+    }
+  }
+  return bestIdx;
+}
+
 function attachExecutions(items: CaptureItem[], pool: { instrument: string; exec: Execution }[]): void {
   if (!pool.length) return;
-  // Index trades by instrument, preserving their position in `items`.
-  const tradesByInst = new Map<string, { item: CaptureItem; start: number; end: number }[]>();
-  for (const item of items) {
-    const inst = item.trade.instrument;
-    if (!tradesByInst.has(inst)) tradesByInst.set(inst, []);
-    tradesByInst.get(inst)!.push({
-      item,
-      start: new Date(item.trade.entryTime).getTime(),
-      end: new Date(item.trade.exitTime).getTime(),
-    });
-  }
+  const targets = items.map((it) => it.trade);
   for (const p of pool) {
-    const candidates = tradesByInst.get(p.instrument);
-    if (!candidates) continue;
-    const t = new Date(p.exec.time).getTime();
-    if (!Number.isFinite(t)) continue;
-    // Score each candidate: 0 when the fill falls inside [entry, exit];
-    // otherwise the distance to the nearest edge (only within FILL_TOL_MS).
-    let best: { item: CaptureItem; score: number } | null = null;
-    for (const c of candidates) {
-      let score: number;
-      if (t >= c.start && t <= c.end) score = 0;
-      else if (t < c.start && c.start - t <= FILL_TOL_MS) score = c.start - t;
-      else if (t > c.end && t - c.end <= FILL_TOL_MS) score = t - c.end;
-      else continue;
-      if (!best || score < best.score) best = { item: c.item, score };
-    }
-    if (!best) continue;
-    const seen = new Set(best.item.executions.map(execKey));
-    if (!seen.has(execKey(p.exec))) best.item.executions.push(p.exec);
+    const idx = assignFillToTrade(p.exec, p.instrument, targets);
+    if (idx < 0) continue;
+    const execs = items[idx].executions;
+    if (!execs.some((e) => execKey(e) === execKey(p.exec))) execs.push(p.exec);
   }
   for (const item of items) {
     if (!item.executions.length) continue;
@@ -804,4 +814,51 @@ export async function importCapture(items: CaptureItem[]): Promise<{ added: numb
     }
   }
   return { added, enriched };
+}
+
+/**
+ * Attach a pool of individual fills (e.g. from a broker's execution export) to
+ * the trades ALREADY in the journal, matching each fill to the one trade whose
+ * instrument + time window best contains it. This is the reliable way to add
+ * per-fill scale-in/out detail to trades imported from a source that only
+ * stores round-trip summaries (like the Trader One journal) — the trades keep
+ * their tags/notes and simply gain an execution ladder.
+ */
+export async function attachExecutionsToTrades(
+  pool: { instrument: string; exec: Execution }[],
+): Promise<{ enriched: number; attached: number; unmatched: number }> {
+  if (!pool.length) return { enriched: 0, attached: 0, unmatched: 0 };
+  const trades = await db.trades.toArray();
+  const additions = new Map<number, Execution[]>(); // index in `trades` → fills to add
+  let unmatched = 0;
+  for (const p of pool) {
+    const idx = assignFillToTrade(p.exec, p.instrument, trades);
+    if (idx < 0) {
+      unmatched++;
+      continue;
+    }
+    if (!additions.has(idx)) additions.set(idx, []);
+    additions.get(idx)!.push(p.exec);
+  }
+  let enriched = 0;
+  let attached = 0;
+  for (const [idx, execs] of additions) {
+    const t = trades[idx];
+    const existing = t.executions ?? [];
+    const seen = new Set(existing.map(execKey));
+    const merged = [...existing];
+    for (const e of execs) {
+      if (!seen.has(execKey(e))) {
+        seen.add(execKey(e));
+        merged.push(e);
+      }
+    }
+    if (merged.length > existing.length) {
+      merged.sort((a, b) => a.time.localeCompare(b.time));
+      await db.trades.update(t.id!, { executions: merged.slice(0, 200) });
+      enriched++;
+      attached += merged.length - existing.length;
+    }
+  }
+  return { enriched, attached, unmatched };
 }
