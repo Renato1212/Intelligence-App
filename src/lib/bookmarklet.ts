@@ -26,7 +26,7 @@ const SRC = `(function(){try{
 if(window.__edgeCap){window.__edgeCap.finish();return;}
 var SEP=String.fromCharCode(1);
 function txt(el){return ((el&&el.innerText)||'').replace(/\\s+/g,' ').trim();}
-var state={reqs:[],ws:[],acc:{},scans:0,hooked:0};
+var state={reqs:[],ws:[],acc:{},scans:0,hooked:0,loose:[],looseSeen:{},frames:[]};
 function looksJson(s){if(!s)return false;var t=s.replace(/^\\uFEFF/,'').trimStart();return t.charAt(0)==='{'||t.charAt(0)==='[';}
 function pushReq(u,s){try{if(looksJson(s)&&s.length<4000000&&state.reqs.length<400)state.reqs.push({url:String(u||''),body:s});}catch(e){}}
 function pushWs(u,d){try{if(typeof d==='string'&&d.length<2000000&&state.ws.length<2000)state.ws.push({url:String(u||''),body:d});}catch(e){}}
@@ -99,15 +99,34 @@ if(ch.children.length<2)continue;var cs3=[];for(var cc=0;cc<ch.children.length;c
 if(!cs3.some(function(x){return x;}))continue;var ri3=rows3.length;rows3.push(cs3);
 var ims3=ch.querySelectorAll('img');for(var k3=0;k3<ims3.length;k3++)if(ims3[k3].src)imgs3.push({row:ri3,src:ims3[k3].src});}
 if(rows3.length)merge(hs,rows3,imgs3);}}
+// Loose scan — capture EVERY repeated multi-cell row structure, regardless of
+// header keywords, as long as it contains price-like numbers. This grabs a
+// fills/executions panel even when its layout doesn't match the table
+// heuristics above (custom divs, no header row). The app filters real fills
+// out of these by shape; non-fill rows are harmless.
+function priceish(s){return /\\d{2,7}([.,]\\d{1,4})?/.test(s);}
+function scanLoose(doc){
+var all=doc.querySelectorAll('div,ul,ol,tbody,section');
+for(var i=0;i<all.length&&i<15000;i++){var cont=all[i];var kids=cont.children;if(!kids||kids.length<3)continue;
+var rowEls=[];for(var k=0;k<kids.length;k++){var ch=kids[k];if(ch.children&&ch.children.length>=2)rowEls.push(ch);}
+if(rowEls.length<3)continue;var rows=[],withPrice=0;
+for(var r=0;r<rowEls.length&&r<500;r++){var cells=[];var cc=rowEls[r].children;
+for(var c=0;c<cc.length;c++){var tv=txt(cc[c]);if(tv&&tv.length<=44)cells.push(tv);}
+if(cells.length<3)continue;if(priceish(cells.join(' ')))withPrice++;rows.push(cells);}
+if(rows.length<3||withPrice<2)continue;
+for(var rr=0;rr<rows.length;rr++){var key=rows[rr].join(SEP);if(!state.looseSeen[key]&&state.loose.length<4000){state.looseSeen[key]=1;state.loose.push(rows[rr]);}}}}
 function totalRows(){var n=0;for(var k in state.acc)n+=state.acc[k].order.length;return n;}
 function updateBadge(){var el=document.getElementById('__edgecapbadge');if(!el)return;
-el.innerHTML='&#9210; <b>Edge Capture recording</b><br>'+totalRows()+' table row(s) · '+state.reqs.length+' API · '+state.ws.length+' stream msg(s)<br>Open your trade log AND click into individual trades so their fills load, then <u>click here to finish</u>.';}
-function runScan(){hookFrames();var d=docsList();for(var i=0;i<d.docs.length;i++){try{scanDoc(d.docs[i],mergeTable);}catch(e){}}state.lastCross=d.cross;state.scans++;updateBadge();}
+el.innerHTML='&#9210; <b>Edge Capture recording</b><br>'+totalRows()+' table row(s) · '+state.reqs.length+' API · '+state.ws.length+' stream · '+state.loose.length+' loose<br>Open your trade log AND click into individual trades so their fills show, then <u>click here to finish</u>.';}
+function runScan(){hookFrames();var d=docsList();for(var i=0;i<d.docs.length;i++){try{scanDoc(d.docs[i],mergeTable);}catch(e){}try{scanLoose(d.docs[i]);}catch(e){}}state.lastCross=d.cross;state.scans++;updateBadge();}
 var timer=setInterval(runScan,800);
 runScan();
 function finish(){var w=window.__edgeCap;if(w&&w.done)return;if(w)w.done=true;
 clearInterval(timer);
 runScan();
+try{var fd=docsList();for(var fi=0;fi<fd.docs.length&&state.frames.length<6;fi++){try{var fdoc=fd.docs[fi];
+var ftxt=(fdoc.body?fdoc.body.innerText:'').replace(/\\s+/g,' ').slice(0,120000);
+state.frames.push({url:(fdoc.location&&fdoc.location.href)||(fi===0?location.href:'frame'+fi),text:ftxt});}catch(e){}}}catch(e){}
 var tbls=[];
 for(var sig in state.acc){var entry=state.acc[sig];var rows=[],rowImages=[];
 for(var i=0;i<entry.order.length;i++){var key=entry.order[i];rows.push(entry.rowMap[key]);
@@ -117,10 +136,10 @@ var accRows=0;for(var ti0=0;ti0<tbls.length;ti0++)accRows+=tbls[ti0].rows.length
 var diag={tables:document.querySelectorAll('table').length,ariaGrids:document.querySelectorAll('[role=table],[role=grid]').length,
 iframes:document.querySelectorAll('iframe').length,crossOriginFrames:state.lastCross||0,canvases:document.querySelectorAll('canvas').length,
 flutter:!!(window._flutter||window.flutterCanvasKit),react:!!document.querySelector('[data-reactroot],#root,#app'),
-jsonResponses:state.reqs.length,wsFrames:state.ws.length,realmsHooked:state.hooked,scans:state.scans,accumulatedTables:tbls.length,accumulatedRows:accRows,
+jsonResponses:state.reqs.length,wsFrames:state.ws.length,realmsHooked:state.hooked,looseRows:state.loose.length,framesCaptured:state.frames.length,scans:state.scans,accumulatedTables:tbls.length,accumulatedRows:accRows,
 textSample:(document.body?document.body.innerText:'').replace(/\\s+/g,' ').slice(0,1500)};
-var payload={source:'edge-capture',version:5,url:location.href,title:document.title,capturedAt:new Date().toISOString(),
-tables:tbls,requests:state.reqs,ws:state.ws,diagnostics:diag};
+var payload={source:'edge-capture',version:6,url:location.href,title:document.title,capturedAt:new Date().toISOString(),
+tables:tbls,requests:state.reqs,ws:state.ws,loose:state.loose,frames:state.frames,diagnostics:diag};
 var el=document.getElementById('__edgecapbadge');if(el)el.remove();
 var doDl=function(){var s=JSON.stringify(payload);
 try{var b=new Blob([s],{type:'application/json'});var a=document.createElement('a');
