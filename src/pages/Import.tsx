@@ -196,10 +196,12 @@ export default function ImportPage() {
             </li>
             <li>
               <b>For scale-in/out detail:</b> the trade log only holds the <i>averaged</i> entry/exit. The individual
-              fills load only when you <b>open a trade</b>, so while still recording <b>click into each trade</b> whose
-              breakdown you want. The recorder now hooks the network <i>inside Trader One's app frames</i> — where its
-              WebSocket stream and fill requests actually live — not just the outer page. Watch the badge's “stream
-              msg(s)” and “API” counts climb as you open trades; if they stay at 0, share the file and I'll tune it.
+              fills appear only when you <b>open a trade</b>, so while still recording <b>click into each trade</b>{' '}
+              whose breakdown you want and let its detail show for a second. The recorder now grabs the fills three
+              ways at once — network inside Trader One's app frames, the WebSocket stream, and <i>any executions table
+              visible on screen</i> (even custom layouts with no headers). Watch the badge's “stream”, “API” and
+              “loose” counts climb as you open trades. If none of them move, finish anyway and send me the file — v6
+              embeds a full-page text snapshot so I can see exactly what Trader One renders and finish the job.
             </li>
             <li>
               <b>Finish:</b> click the gold badge — the <span className="mono">edge-capture.json</span> downloads.

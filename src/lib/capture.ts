@@ -27,6 +27,10 @@ export interface CapturePayload {
   requests?: { url: string; body: string }[];
   /** v4: text frames streamed over WebSocket (positions/orders/fills) */
   ws?: { url: string; body: string }[];
+  /** v6: every repeated multi-cell row structure on the page (header-agnostic) */
+  loose?: string[][];
+  /** v6: full innerText of each frame, for diagnostics / text fallback */
+  frames?: { url: string; text: string }[];
   /** v2+: page structure hints for debugging unsupported layouts */
   diagnostics?: {
     tables?: number;
@@ -38,6 +42,11 @@ export interface CapturePayload {
     jsonResponses?: number;
     /** v4: number of WebSocket text frames captured */
     wsFrames?: number;
+    /** v5: how many JS realms (window + iframes) the network hooks reached */
+    realmsHooked?: number;
+    /** v6: header-agnostic row structures captured / frames text-snapshotted */
+    looseRows?: number;
+    framesCaptured?: number;
     /** v3: how many scan passes ran while recording (~1 per 800ms) */
     scans?: number;
     /** v3: distinct header signatures / total rows accumulated across all scans */
@@ -269,6 +278,81 @@ const execKey = (e: Execution) => [e.time, e.action, e.qty, e.price].join('|');
  * back-to-back trades on the same instrument (whose padded windows overlap)
  * never double-count a boundary fill.
  */
+/* ---------- headerless fill detection from loose DOM rows (v6) ---------- */
+// A "loose" row is a repeated multi-cell structure captured from the page
+// regardless of headers (e.g. an executions panel built from custom divs).
+// We recognise a FILL row purely from cell content: it needs a price, a
+// quantity, a time and a buy/sell side — four independent signals, so noise
+// (random tables) almost never qualifies. Round-trip trade rows are rejected
+// up front because they carry a currency/P&L cell.
+const MONEY_RE = /[$€£]/;
+const CLOCK_RE = /^\d{1,2}:\d{2}(:\d{2})?$/;
+
+function looseRowToFill(cells: string[], dateHint?: string): { instrument: string | null; exec: Execution } | null {
+  if (cells.some((c) => MONEY_RE.test(c))) return null; // trade-log / P&L row, not a fill
+  let side: 'BUY' | 'SELL' | null = null;
+  let time: string | null = null;
+  let orderType = normalizeOrderType(null);
+  let instrument: string | null = null;
+  const nums: { v: number; dec: boolean }[] = [];
+  for (const raw of cells) {
+    const s = raw.trim();
+    if (!s) continue;
+    const low = s.toLowerCase();
+    if (side == null && SIDE_VALUE.test(low)) {
+      if (/^(s|sell|short|sld|sold|ask|so)/.test(low)) side = 'SELL';
+      else if (/^(b|buy|long|bot|bought|bid|bo)/.test(low)) side = 'BUY';
+      continue;
+    }
+    if (orderType === 'unknown') {
+      const ot = normalizeOrderType(low);
+      if (ot !== 'unknown') {
+        orderType = ot;
+        continue;
+      }
+    }
+    if (time == null && (CLOCK_RE.test(s) || looksLikeTimeValue(s))) {
+      const t = toWhen(s, dateHint);
+      if (t) {
+        time = t;
+        continue;
+      }
+    }
+    if (instrument == null && /^[A-Z][A-Z0-9]{0,5}$/.test(s) && !/^\d+$/.test(s)) {
+      instrument = symbolRoot(s);
+      continue;
+    }
+    const n = toNum(s);
+    if (n != null) nums.push({ v: n, dec: /[.,]\d/.test(s) });
+  }
+  if (side == null || time == null || !nums.length) return null;
+  const decs = nums.filter((n) => n.dec);
+  const price = (decs.length ? decs : nums).reduce((a, b) => (Math.abs(b.v) > Math.abs(a.v) ? b : a)).v;
+  const intCand = nums.filter(
+    (n) => !n.dec && n.v !== price && Number.isInteger(n.v) && Math.abs(n.v) >= 1 && Math.abs(n.v) <= 100000,
+  );
+  const qty = intCand.length ? Math.abs(intCand[0].v) : null;
+  if (price == null || qty == null || !qty) return null;
+  return { instrument, exec: { time, action: side, qty, price, orderType } };
+}
+
+/** Extract fills from all loose rows; dedupe by execution key. */
+function fillsFromLooseRows(rows: string[][] | undefined, dateHint?: string): { instrument: string | null; exec: Execution }[] {
+  if (!rows?.length) return [];
+  const out: { instrument: string | null; exec: Execution }[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    if (!Array.isArray(row) || row.length < 3) continue;
+    const f = looseRowToFill(row, dateHint);
+    if (!f) continue;
+    const k = (f.instrument ?? '') + '|' + execKey(f.exec);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(f);
+  }
+  return out;
+}
+
 const FILL_TOL_MS = 5 * 60000; // candidacy padding on each side of the trade window
 
 /** How well a fill at time `t` fits a trade window: 0 = inside, else edge distance (null = out of range). */
@@ -286,14 +370,16 @@ function scoreFillWindow(t: number, start: number, end: number): number | null {
  */
 export function assignFillToTrade(
   exec: Execution,
-  instrument: string,
+  instrument: string | null,
   trades: { instrument: string; entryTime: string; exitTime: string }[],
 ): number {
   const t = new Date(exec.time).getTime();
   let bestIdx = -1;
   let bestScore = Infinity;
   for (let i = 0; i < trades.length; i++) {
-    if (trades[i].instrument !== instrument) continue;
+    // A loose fill may carry no instrument (panel didn't repeat the symbol);
+    // then match on time alone. Otherwise the instruments must agree.
+    if (instrument && trades[i].instrument !== instrument) continue;
     const s = scoreFillWindow(t, new Date(trades[i].entryTime).getTime(), new Date(trades[i].exitTime).getTime());
     if (s == null) continue;
     if (s < bestScore) {
@@ -304,7 +390,7 @@ export function assignFillToTrade(
   return bestIdx;
 }
 
-function attachExecutions(items: CaptureItem[], pool: { instrument: string; exec: Execution }[]): void {
+function attachExecutions(items: CaptureItem[], pool: { instrument: string | null; exec: Execution }[]): void {
   if (!pool.length) return;
   const targets = items.map((it) => it.trade);
   for (const p of pool) {
@@ -321,9 +407,10 @@ function attachExecutions(items: CaptureItem[], pool: { instrument: string; exec
 }
 
 /** When only executions were captured (no trade log), build round-trip trades FIFO. */
-function tradesFromExecutionPool(pool: { instrument: string; exec: Execution }[]): CaptureItem[] {
+function tradesFromExecutionPool(pool: { instrument: string | null; exec: Execution }[]): CaptureItem[] {
   const byInst = new Map<string, Execution[]>();
   for (const p of pool) {
+    if (!p.instrument) continue; // can't reconstruct a round-trip without a symbol
     if (!byInst.has(p.instrument)) byInst.set(p.instrument, []);
     byInst.get(p.instrument)!.push(p.exec);
   }
@@ -609,7 +696,7 @@ export function parseCapture(text: string): CaptureParseResult {
   const warnings: string[] = [];
   const items: CaptureItem[] = [];
   const seen = new Set<string>();
-  const execPool: { instrument: string; exec: Execution }[] = [];
+  const execPool: { instrument: string | null; exec: Execution }[] = [];
   const seenPool = new Set<string>();
 
   for (const table of payload.tables) {
@@ -671,6 +758,17 @@ export function parseCapture(text: string): CaptureParseResult {
         seenPool.add(k);
         execPool.push(e);
       }
+    }
+  }
+
+  // v6: fills recovered from loose DOM rows (an executions panel whose layout
+  // matched no table heuristic). A trade day's fills share the capture date.
+  const looseDateHint = items[0]?.trade.date ?? payload.capturedAt?.slice(0, 10);
+  for (const f of fillsFromLooseRows(payload.loose, looseDateHint)) {
+    const k = (f.instrument ?? '') + '|' + execKey(f.exec);
+    if (!seenPool.has(k)) {
+      seenPool.add(k);
+      execPool.push(f);
     }
   }
 
@@ -825,7 +923,7 @@ export async function importCapture(items: CaptureItem[]): Promise<{ added: numb
  * their tags/notes and simply gain an execution ladder.
  */
 export async function attachExecutionsToTrades(
-  pool: { instrument: string; exec: Execution }[],
+  pool: { instrument: string | null; exec: Execution }[],
 ): Promise<{ enriched: number; attached: number; unmatched: number }> {
   if (!pool.length) return { enriched: 0, attached: 0, unmatched: 0 };
   const trades = await db.trades.toArray();
