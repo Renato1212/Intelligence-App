@@ -31,6 +31,9 @@ export interface CapturePayload {
   loose?: string[][];
   /** v6: full innerText of each frame, for diagnostics / text fallback */
   frames?: { url: string; text: string }[];
+  /** v7: results of active read-only API probes for fills (diagnostics only —
+   * successful probe bodies are also appended to `requests`) */
+  probes?: { url: string; status: number; len?: number }[];
   /** v2+: page structure hints for debugging unsupported layouts */
   diagnostics?: {
     tables?: number;
@@ -47,6 +50,8 @@ export interface CapturePayload {
     /** v6: header-agnostic row structures captured / frames text-snapshotted */
     looseRows?: number;
     framesCaptured?: number;
+    /** v7: how many active fills-probe requests were fired */
+    probes?: number;
     /** v3: how many scan passes ran while recording (~1 per 800ms) */
     scans?: number;
     /** v3: distinct header signatures / total rows accumulated across all scans */
@@ -120,7 +125,7 @@ const JSON_KEYS: Record<string, string[]> = {
   symbol: ['symbol', 'instrument', 'contract', 'market', 'ticker', 'inst', 'sym', 'symbolname', 'instrumentname', 'product', 'productcode', 'productname'],
   date: ['date', 'tradedate', 'day', 'sessiondate'],
   entryTime: ['entrytime', 'opentime', 'entrydate', 'opened', 'openedat', 'openat', 'entryts', 'entryat', 'starttime', 'open', 'entry'],
-  exitTime: ['exittime', 'closetime', 'exitdate', 'closed', 'closedat', 'closeat', 'endtime', 'close', 'exit'],
+  exitTime: ['exittime', 'closetime', 'exitdate', 'closed', 'closedat', 'closeat', 'exitts', 'exitat', 'closets', 'endtime', 'close', 'exit'],
   entryPrice: ['entryprice', 'openprice', 'avgentryprice', 'pricein', 'avgopen', 'entryavg', 'openingprice', 'avgopenprice'],
   exitPrice: ['exitprice', 'closeprice', 'avgexitprice', 'priceout', 'avgclose', 'exitavg', 'closingprice', 'avgcloseprice'],
   qty: ['qty', 'quantity', 'size', 'contracts', 'volume', 'lots', 'totalsize', 'filledqty', 'positionsize'],
