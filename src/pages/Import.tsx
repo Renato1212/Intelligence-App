@@ -195,13 +195,12 @@ export default function ImportPage() {
               / journal and scroll through everything so every row loads.
             </li>
             <li>
-              <b>For scale-in/out detail:</b> the trade log only holds the <i>averaged</i> entry/exit. The individual
-              fills appear only when you <b>open a trade</b>, so while still recording <b>click into each trade</b>{' '}
-              whose breakdown you want and let its detail show for a second. The recorder now grabs the fills three
-              ways at once — network inside Trader One's app frames, the WebSocket stream, and <i>any executions table
-              visible on screen</i> (even custom layouts with no headers). Watch the badge's “stream”, “API” and
-              “loose” counts climb as you open trades. If none of them move, finish anyway and send me the file — v6
-              embeds a full-page text snapshot so I can see exactly what Trader One renders and finish the job.
+              <b>For scale-in/out detail:</b> the trade log only holds the <i>averaged</i> entry/exit — the individual
+              fills aren't shown in Trader One's journal at all. So when you click <b>Finish</b>, Edge Capture asks
+              your permission to <b>query Trader One's own API for the fills</b> (the exact size, price and
+              market/limit of every scale in &amp; out). Click <b>OK</b> on that dialog — it sends only read-only
+              requests using your logged-in session, places no orders and changes nothing on your account. The fills
+              it finds are matched to your trades automatically.
             </li>
             <li>
               <b>Finish:</b> click the gold badge — the <span className="mono">edge-capture.json</span> downloads.

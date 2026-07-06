@@ -26,7 +26,7 @@ const SRC = `(function(){try{
 if(window.__edgeCap){window.__edgeCap.finish();return;}
 var SEP=String.fromCharCode(1);
 function txt(el){return ((el&&el.innerText)||'').replace(/\\s+/g,' ').trim();}
-var state={reqs:[],ws:[],acc:{},scans:0,hooked:0,loose:[],looseSeen:{},frames:[]};
+var state={reqs:[],ws:[],acc:{},scans:0,hooked:0,loose:[],looseSeen:{},frames:[],probes:[]};
 function looksJson(s){if(!s)return false;var t=s.replace(/^\\uFEFF/,'').trimStart();return t.charAt(0)==='{'||t.charAt(0)==='[';}
 function pushReq(u,s){try{if(looksJson(s)&&s.length<4000000&&state.reqs.length<400)state.reqs.push({url:String(u||''),body:s});}catch(e){}}
 function pushWs(u,d){try{if(typeof d==='string'&&d.length<2000000&&state.ws.length<2000)state.ws.push({url:String(u||''),body:d});}catch(e){}}
@@ -53,6 +53,50 @@ try{NES.prototype=OES.prototype;}catch(e){}try{win.EventSource=NES;}catch(e){}}}
 }catch(e){}}
 function hookFrames(){try{var ifr=document.querySelectorAll('iframe');for(var i=0;i<ifr.length;i++){try{hookRealm(ifr[i].contentWindow);}catch(e){}}}catch(e){}}
 hookRealm(window);hookFrames();
+// Active fills probe (v7). The journal API (/api/trade/history) returns only
+// averaged round-trips, but each trade carries an id + trade_session_id and
+// the backend is event-sourced (last_seq_by_account) — the per-fill data
+// almost certainly lives behind an endpoint the journal UI never calls. With
+// the user's explicit consent we ask that API directly, read-only, using the
+// page's own session, keyed by the trade refs we captured. Any fills that come
+// back are pushed into state.reqs so the normal shape-based parser handles them.
+function grabToken(){var stores=[];
+try{stores.push(window.localStorage);}catch(e){}try{stores.push(window.sessionStorage);}catch(e){}
+try{var ifr=document.querySelectorAll('iframe');for(var i=0;i<ifr.length;i++){try{stores.push(ifr[i].contentWindow.localStorage);}catch(e){}try{stores.push(ifr[i].contentWindow.sessionStorage);}catch(e){}}}catch(e){}
+for(var s=0;s<stores.length;s++){var st=stores[s];if(!st)continue;try{for(var k=0;k<st.length;k++){var key=st.key(k);if(!key||!/token|auth|jwt|access|bearer/i.test(key))continue;var val=st.getItem(key);if(!val||val.length>6000)continue;
+if(val.split('.').length===3&&val.indexOf(' ')<0)return val;
+try{var o=JSON.parse(val);var t=o&&(o.access_token||o.token||o.accessToken||o.jwt||o.id_token||(o.currentSession&&o.currentSession.access_token));if(t&&String(t).split('.').length===3)return String(t);}catch(e){}
+if(val.length>20&&val.length<2000&&val.indexOf(' ')<0&&val.indexOf('{')<0)return val;}}catch(e){}}
+return null;}
+function collectTradeRefs(){var ids=[],sess=[],acct=null;
+for(var i=0;i<state.reqs.length;i++){var b=state.reqs[i].body;if(!b)continue;if(b.indexOf('trade_session_id')<0&&b.indexOf('account_code')<0&&b.indexOf('selected_account')<0)continue;
+try{var o=JSON.parse(b);if(o){if(o.account&&o.account.code)acct=o.account.code;if(o.selected_account&&o.selected_account.code)acct=o.selected_account.code;
+var rows=o.rows||o.trades;if(rows&&rows.length)for(var r=0;r<rows.length;r++){var rw=rows[r];if(rw){if(rw.id!=null&&ids.indexOf(rw.id)<0)ids.push(rw.id);if(rw.trade_session_id&&sess.indexOf(rw.trade_session_id)<0)sess.push(rw.trade_session_id);if(rw.account&&rw.account.code)acct=rw.account.code;}}}}catch(e){}}
+return {ids:ids,sess:sess,acct:acct};}
+function buildProbeUrls(refs){var O=location.origin,u=[],AC=refs.acct?encodeURIComponent(refs.acct):'';
+u.push(O+'/api/trade/state?limit_trades=200&include_fills=1&include_executions=1&include_orders=1');
+if(AC){u.push(O+'/api/trade/fills?account_code='+AC+'&page_size=1000');u.push(O+'/api/trade/executions?account_code='+AC+'&page_size=1000');u.push(O+'/api/fills?account_code='+AC+'&page_size=1000');u.push(O+'/api/executions?account_code='+AC+'&page_size=1000');u.push(O+'/api/trade/events?account_code='+AC+'&since=0&page_size=2000');}
+for(var i=0;i<refs.ids.length&&i<10;i++){var id=refs.ids[i];u.push(O+'/api/trade/'+id+'?include_fills=1&include_executions=1&include_legs=1');u.push(O+'/api/trade/'+id+'/fills');u.push(O+'/api/trade/'+id+'/executions');u.push(O+'/api/trade/'+id+'/legs');}
+for(var j=0;j<refs.sess.length&&j<8;j++){var sid=refs.sess[j];u.push(O+'/api/trade/session/'+sid);u.push(O+'/api/trade/session/'+sid+'/fills');u.push(O+'/api/trade/session/'+sid+'/executions');}
+return u;}
+function probeOne(url,hdrs){return (OFETCH||window.fetch)(url,{credentials:'include',headers:hdrs}).then(function(r){var st=r.status;return r.text().then(function(t){return {st:st,t:t,url:url};});}).catch(function(e){return {st:-1,t:'',url:url};});}
+function recordProbe(o){try{state.probes.push({url:o.url,status:o.st,len:(o.t||'').length});}catch(e){}try{if(o.st>=200&&o.st<300&&looksJson(o.t)&&o.t.length<4000000&&state.reqs.length<800)state.reqs.push({url:o.url,body:o.t});}catch(e){}}
+function probeFills(cb){
+var tok=null;try{tok=grabToken();}catch(e){}var hdrs={'accept':'application/json'};if(tok)hdrs['authorization']='Bearer '+tok;
+var O=location.origin;var refs;try{refs=collectTradeRefs();}catch(e){refs={ids:[],sess:[],acct:null};}
+var doneP=false,tmr=setTimeout(function(){if(!doneP){doneP=true;cb();}},13000);
+var finish2=function(){if(!doneP){doneP=true;clearTimeout(tmr);cb();}};
+// Phase 1: actively (re)fetch the trade history WITH fill flags. This gives
+// fresh trade ids/session ids even if we didn't passively catch history, and
+// may itself return the fills if the backend honours the include flags.
+probeOne(O+'/api/trade/history?page=1&page_size=200&include_rows=1&include_lists=1&include_fills=1&include_executions=1&include_legs=1&include_orders=1&include_events=1',hdrs).then(function(h){
+recordProbe(h);try{var o=JSON.parse(h.t);var rows=o&&(o.rows||o.trades);if(rows)for(var r=0;r<rows.length;r++){var rw=rows[r];if(!rw)continue;if(rw.id!=null&&refs.ids.indexOf(rw.id)<0)refs.ids.push(rw.id);if(rw.trade_session_id&&refs.sess.indexOf(rw.trade_session_id)<0)refs.sess.push(rw.trade_session_id);}if(!refs.acct&&o.account&&o.account.code)refs.acct=o.account.code;if(!refs.acct&&o.selected_account&&o.selected_account.code)refs.acct=o.selected_account.code;}catch(e){}
+// Phase 2: probe per-trade / per-session / account fill endpoints.
+var urls;try{urls=buildProbeUrls(refs);}catch(e){urls=[];}
+if(!urls.length){finish2();return;}
+var pend=urls.length;var step=function(){pend--;if(pend<=0)finish2();};
+for(var j=0;j<urls.length;j++){(function(u){probeOne(u,hdrs).then(recordProbe).catch(function(){}).then(step);})(urls[j]);}
+}).catch(function(){finish2();});}
 function docsList(){var out=[document],cross=0,ifr=document.querySelectorAll('iframe');
 for(var i=0;i<ifr.length;i++){try{var d=ifr[i].contentDocument;if(d&&d.body)out.push(d);else cross++;}catch(e){cross++;}}
 return{docs:out,cross:cross};}
@@ -136,23 +180,25 @@ var accRows=0;for(var ti0=0;ti0<tbls.length;ti0++)accRows+=tbls[ti0].rows.length
 var diag={tables:document.querySelectorAll('table').length,ariaGrids:document.querySelectorAll('[role=table],[role=grid]').length,
 iframes:document.querySelectorAll('iframe').length,crossOriginFrames:state.lastCross||0,canvases:document.querySelectorAll('canvas').length,
 flutter:!!(window._flutter||window.flutterCanvasKit),react:!!document.querySelector('[data-reactroot],#root,#app'),
-jsonResponses:state.reqs.length,wsFrames:state.ws.length,realmsHooked:state.hooked,looseRows:state.loose.length,framesCaptured:state.frames.length,scans:state.scans,accumulatedTables:tbls.length,accumulatedRows:accRows,
+jsonResponses:state.reqs.length,wsFrames:state.ws.length,realmsHooked:state.hooked,looseRows:state.loose.length,framesCaptured:state.frames.length,probes:state.probes.length,scans:state.scans,accumulatedTables:tbls.length,accumulatedRows:accRows,
 textSample:(document.body?document.body.innerText:'').replace(/\\s+/g,' ').slice(0,1500)};
-var payload={source:'edge-capture',version:6,url:location.href,title:document.title,capturedAt:new Date().toISOString(),
-tables:tbls,requests:state.reqs,ws:state.ws,loose:state.loose,frames:state.frames,diagnostics:diag};
+var payload={source:'edge-capture',version:7,url:location.href,title:document.title,capturedAt:new Date().toISOString(),
+tables:tbls,requests:state.reqs,ws:state.ws,loose:state.loose,frames:state.frames,probes:state.probes,diagnostics:diag};
 var el=document.getElementById('__edgecapbadge');if(el)el.remove();
-var doDl=function(){var s=JSON.stringify(payload);
+var doDl=function(){diag.jsonResponses=state.reqs.length;diag.probes=state.probes.length;var s=JSON.stringify(payload);
 try{var b=new Blob([s],{type:'application/json'});var a=document.createElement('a');
 a.href=URL.createObjectURL(b);a.download='edge-capture-'+new Date().toISOString().slice(0,10)+'.json';
 document.body.appendChild(a);a.click();a.remove();}catch(e){}
 try{var cp=navigator.clipboard.writeText(s);if(cp&&cp.catch)cp.catch(function(){});}catch(e){}
-alert('Edge Capture finished: '+accRows+' table row(s), '+state.reqs.length+' API response(s), '+state.ws.length+' stream message(s). File downloaded (and copied to clipboard) - import it in Edge Intelligence. To get per-fill detail you must OPEN individual trades while recording so their fills load.');
+alert('Edge Capture finished: '+accRows+' table row(s), '+state.reqs.length+' API response(s), '+state.probes.length+' fill-probe(s). File downloaded (and copied to clipboard) - import it in Edge Intelligence.');
 window.__edgeCap=null;};
-var pend=0,cnt=0,fin2=false,MAX=60;var done2=function(){if(fin2)return;fin2=true;doDl();};
+var runImages=function(){var pend=0,cnt=0,fin2=false,MAX=60;var done2=function(){if(fin2)return;fin2=true;doDl();};
 for(var ti=0;ti<tbls.length;ti++){var rims=tbls[ti].rowImages||[];
 for(var ii=0;ii<rims.length;ii++){(function(rec){if(cnt>=MAX)return;cnt++;pend++;
 (OFETCH||window.fetch)(rec.src).then(function(r){return r.blob();}).then(function(bl){return new Promise(function(res){var fr=new FileReader();fr.onload=function(){res(fr.result);};fr.readAsDataURL(bl);});}).then(function(du){rec.dataUrl=du;}).catch(function(){}).then(function(){pend--;if(pend<=0)done2();});})(rims[ii]);}}
-if(pend<=0)done2();}
+if(pend<=0)done2();};
+var askProbe=false;try{var hay=location.host+' '+JSON.stringify(state.frames).slice(0,80000)+JSON.stringify(state.reqs).slice(0,80000);askProbe=/axiafutures|api\\/trade|trade_session_id|trade history|account_code/i.test(hay);}catch(e){askProbe=/axiafutures/i.test(location.host);}
+if(askProbe&&confirm('Ask Trader One\\'s own API for your individual fills (exact size / price / market-limit of every scale in & out)?\\n\\nThis sends READ-ONLY requests to '+location.host+' using your already-logged-in session. It places no orders and changes nothing on your account. Recommended.')){probeFills(runImages);}else{runImages();}}
 window.__edgeCap={finish:finish,done:false};
 var bg=document.createElement('div');bg.id='__edgecapbadge';
 bg.style.cssText='position:fixed;top:12px;right:12px;z-index:2147483647;background:#c9a227;color:#141210;font:600 13px/1.4 system-ui,sans-serif;padding:10px 16px;border-radius:9px;cursor:pointer;box-shadow:0 6px 22px rgba(0,0,0,.45);max-width:300px';
