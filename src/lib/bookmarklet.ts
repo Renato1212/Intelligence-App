@@ -26,10 +26,26 @@ const SRC = `(function(){try{
 if(window.__edgeCap){window.__edgeCap.finish();return;}
 var SEP=String.fromCharCode(1);
 function txt(el){return ((el&&el.innerText)||'').replace(/\\s+/g,' ').trim();}
-var state={reqs:[],ws:[],acc:{},scans:0,hooked:0,loose:[],looseSeen:{},frames:[],probes:[]};
+var state={reqs:[],ws:[],acc:{},scans:0,hooked:0,loose:[],looseSeen:{},frames:[],probes:[],wsSample:[]};
+var WSSEEN={};var FILLKW=/fill|exec|filled|"?side"?|avgprice|avg_price|"?qty"?|"?price"?|position|"?leg|order/i;
 function looksJson(s){if(!s)return false;var t=s.replace(/^\\uFEFF/,'').trimStart();return t.charAt(0)==='{'||t.charAt(0)==='[';}
 function pushReq(u,s){try{if(looksJson(s)&&s.length<4000000&&state.reqs.length<400)state.reqs.push({url:String(u||''),body:s});}catch(e){}}
-function pushWs(u,d){try{if(typeof d==='string'&&d.length<2000000&&state.ws.length<2000)state.ws.push({url:String(u||''),body:d});}catch(e){}}
+// Live trading streams fills over WebSocket — often as BINARY frames — mixed
+// with high-volume market data. We decode binary, keep JSON + fill-shaped
+// frames (deduped), and always keep a small raw sample of every distinct
+// frame shape so an unknown fill format is still visible in the file.
+function wsStore(u,t){try{if(!t||typeof t!=='string')return;
+if(state.wsSample.length<80){var sk=t.slice(0,60);if(!WSSEEN['s'+sk]){WSSEEN['s'+sk]=1;state.wsSample.push(t.slice(0,2000));}}
+if(t.length>1500000)return;if(!looksJson(t)&&!FILLKW.test(t))return;
+var k=t.length+'|'+t.slice(0,90);if(WSSEEN[k])return;WSSEEN[k]=1;
+if(state.ws.length<8000)state.ws.push({url:String(u||''),body:t});}catch(e){}}
+function pushWs(u,d){try{
+if(typeof d==='string'){wsStore(u,d);return;}
+if(d&&typeof d==='object'){
+if(d instanceof ArrayBuffer){wsStore(u,new TextDecoder('utf-8',{fatal:false}).decode(new Uint8Array(d)));return;}
+if(d.buffer&&d.byteLength!=null){wsStore(u,new TextDecoder('utf-8',{fatal:false}).decode(d));return;}
+if(typeof Blob!=='undefined'&&d instanceof Blob){if(d.size<1500000&&d.text)d.text().then(function(t){wsStore(u,t);}).catch(function(){});return;}}
+}catch(e){}}
 var OFETCH=window.fetch;
 // Hook the network APIs of a JS realm. Trading apps like Trader One run the
 // whole UI inside same-origin iframes, so the WebSocket that streams fills
@@ -51,8 +67,13 @@ try{var OES=win.EventSource;if(OES){var NES=function(url,cfg){var es=(arguments.
 try{es.addEventListener('message',function(ev){try{pushWs(url,ev.data);}catch(e){}});}catch(e){}return es;};
 try{NES.prototype=OES.prototype;}catch(e){}try{win.EventSource=NES;}catch(e){}}}catch(e){}
 }catch(e){}}
-function hookFrames(){try{var ifr=document.querySelectorAll('iframe');for(var i=0;i<ifr.length;i++){try{hookRealm(ifr[i].contentWindow);}catch(e){}}}catch(e){}}
+function hookFrames(){try{var ifr=document.querySelectorAll('iframe');for(var i=0;i<ifr.length;i++){var f=ifr[i];try{hookRealm(f.contentWindow);}catch(e){}
+try{if(!f.__ecL){f.__ecL=1;f.addEventListener('load',function(ev){try{hookRealm(ev.target.contentWindow);}catch(e){}});}}catch(e){}}}catch(e){}}
 hookRealm(window);hookFrames();
+// A trading iframe can be (re)created after we start; hook it the instant it
+// appears or reloads, so the fill WebSocket opened inside it is never missed.
+try{var ecMO=new MutationObserver(function(muts){try{for(var i=0;i<muts.length;i++){var a=muts[i].addedNodes;if(!a)continue;for(var j=0;j<a.length;j++){var n=a[j];if(n&&n.tagName==='IFRAME'){try{hookRealm(n.contentWindow);}catch(e){}try{n.addEventListener('load',function(ev){try{hookRealm(ev.target.contentWindow);}catch(e){}});}catch(e){}}}}}catch(e){}});
+ecMO.observe(document.documentElement||document,{childList:true,subtree:true});}catch(e){}
 // Active fills probe (v7). The journal API (/api/trade/history) returns only
 // averaged round-trips, but each trade carries an id + trade_session_id and
 // the backend is event-sourced (last_seq_by_account) — the per-fill data
@@ -161,7 +182,7 @@ if(rows.length<3||withPrice<2)continue;
 for(var rr=0;rr<rows.length;rr++){var key=rows[rr].join(SEP);if(!state.looseSeen[key]&&state.loose.length<4000){state.looseSeen[key]=1;state.loose.push(rows[rr]);}}}}
 function totalRows(){var n=0;for(var k in state.acc)n+=state.acc[k].order.length;return n;}
 function updateBadge(){var el=document.getElementById('__edgecapbadge');if(!el)return;
-el.innerHTML='&#9210; <b>Edge Capture recording</b><br>'+totalRows()+' table row(s) · '+state.reqs.length+' API · '+state.ws.length+' stream · '+state.loose.length+' loose<br>Open your trade log AND click into individual trades so their fills show, then <u>click here to finish</u>.';}
+el.innerHTML='&#9210; <b>Edge Capture recording</b><br>'+totalRows()+' rows · '+state.reqs.length+' API · <b>'+state.ws.length+' stream</b> · '+state.loose.length+' loose<br>For fills: keep this running while you trade LIVE — each fill grows the <b>stream</b> count. Then <u>click here to finish</u>.';}
 function runScan(){hookFrames();var d=docsList();for(var i=0;i<d.docs.length;i++){try{scanDoc(d.docs[i],mergeTable);}catch(e){}try{scanLoose(d.docs[i]);}catch(e){}}state.lastCross=d.cross;state.scans++;updateBadge();}
 var timer=setInterval(runScan,800);
 runScan();
@@ -180,10 +201,10 @@ var accRows=0;for(var ti0=0;ti0<tbls.length;ti0++)accRows+=tbls[ti0].rows.length
 var diag={tables:document.querySelectorAll('table').length,ariaGrids:document.querySelectorAll('[role=table],[role=grid]').length,
 iframes:document.querySelectorAll('iframe').length,crossOriginFrames:state.lastCross||0,canvases:document.querySelectorAll('canvas').length,
 flutter:!!(window._flutter||window.flutterCanvasKit),react:!!document.querySelector('[data-reactroot],#root,#app'),
-jsonResponses:state.reqs.length,wsFrames:state.ws.length,realmsHooked:state.hooked,looseRows:state.loose.length,framesCaptured:state.frames.length,probes:state.probes.length,scans:state.scans,accumulatedTables:tbls.length,accumulatedRows:accRows,
+jsonResponses:state.reqs.length,wsFrames:state.ws.length,wsSampled:state.wsSample.length,realmsHooked:state.hooked,looseRows:state.loose.length,framesCaptured:state.frames.length,probes:state.probes.length,scans:state.scans,accumulatedTables:tbls.length,accumulatedRows:accRows,
 textSample:(document.body?document.body.innerText:'').replace(/\\s+/g,' ').slice(0,1500)};
-var payload={source:'edge-capture',version:7,url:location.href,title:document.title,capturedAt:new Date().toISOString(),
-tables:tbls,requests:state.reqs,ws:state.ws,loose:state.loose,frames:state.frames,probes:state.probes,diagnostics:diag};
+var payload={source:'edge-capture',version:8,url:location.href,title:document.title,capturedAt:new Date().toISOString(),
+tables:tbls,requests:state.reqs,ws:state.ws,wsSample:state.wsSample,loose:state.loose,frames:state.frames,probes:state.probes,diagnostics:diag};
 var el=document.getElementById('__edgecapbadge');if(el)el.remove();
 var doDl=function(){diag.jsonResponses=state.reqs.length;diag.probes=state.probes.length;var s=JSON.stringify(payload);
 try{var b=new Blob([s],{type:'application/json'});var a=document.createElement('a');

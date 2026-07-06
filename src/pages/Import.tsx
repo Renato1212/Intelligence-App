@@ -195,26 +195,24 @@ export default function ImportPage() {
               / journal and scroll through everything so every row loads.
             </li>
             <li>
-              <b>For scale-in/out detail:</b> the trade log only holds the <i>averaged</i> entry/exit — the individual
-              fills aren't shown in Trader One's journal at all. So when you click <b>Finish</b>, Edge Capture asks
-              your permission to <b>query Trader One's own API for the fills</b> (the exact size, price and
-              market/limit of every scale in &amp; out). Click <b>OK</b> on that dialog — it sends only read-only
-              requests using your logged-in session, places no orders and changes nothing on your account. The fills
-              it finds are matched to your trades automatically.
-            </li>
-            <li>
               <b>Finish:</b> click the gold badge — the <span className="mono">edge-capture.json</span> downloads.
               Drop it on this page. If no trades are recognised, import the file anyway and share it: it embeds
               diagnostics that let the extractor be tuned for the exact page layout.
             </li>
           </ol>
           <div className="small" style={{ background: 'var(--surface-2, rgba(201,162,39,.08))', borderRadius: 8, padding: '10px 12px', lineHeight: 1.5 }}>
-            <b>Most reliable route for exact fills →</b> export your <b>executions / fills report from your broker</b>{' '}
-            (the platform Trader One connects to — Rithmic R&nbsp;Trader Pro, CQG, etc. all offer a Fills/Order-History
-            CSV). Drop that CSV here: it has <i>every</i> fill with exact size, price, time and market/limit type. You
-            can then <b>“Attach fills to existing trades”</b> to add the scale-in/out ladder to the trades you already
-            imported from Trader One — matched by instrument and time, keeping all their tags. This works regardless of
-            what Trader One's own page exposes.
+            <b>To capture per-fill scale-in/out detail →</b> Trader One <i>discards</i> the individual fills once a
+            trade closes — its journal and API only keep the averaged entry/exit (confirmed by exhaustive probing).
+            The fills exist in only one place: the <b>live WebSocket stream while you trade</b>. So to capture them:
+            <ol style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+              <li>Click the <b>Edge Capture</b> bookmark <b>before you connect</b> and start a trading session.</li>
+              <li>Trade as normal — keep the gold badge recording the whole time. Each fill makes the badge's{' '}
+                <b>“stream”</b> count climb.</li>
+              <li>When you're done, click the badge to finish and drop the file here — your fills become the
+                Entry/Scale-in/Scale-out/Exit ladder automatically.</li>
+            </ol>
+            This works for <b>trades you take from now on</b>. If the stream count climbs but fills don't appear,
+            send me the file — it now samples the raw stream so I can lock onto Trader One's exact live format.
           </div>
           <div className="row">
             <button className="btn sm" onClick={() => setPasteOpen(!pasteOpen)}>
