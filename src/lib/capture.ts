@@ -27,6 +27,8 @@ export interface CapturePayload {
   requests?: { url: string; body: string }[];
   /** v4: text frames streamed over WebSocket (positions/orders/fills) */
   ws?: { url: string; body: string }[];
+  /** v8: raw sample of distinct WebSocket frames (diagnostics for live capture) */
+  wsSample?: string[];
   /** v6: every repeated multi-cell row structure on the page (header-agnostic) */
   loose?: string[][];
   /** v6: full innerText of each frame, for diagnostics / text fallback */
@@ -45,6 +47,8 @@ export interface CapturePayload {
     jsonResponses?: number;
     /** v4: number of WebSocket text frames captured */
     wsFrames?: number;
+    /** v8: number of distinct raw WebSocket frames sampled for diagnostics */
+    wsSampled?: number;
     /** v5: how many JS realms (window + iframes) the network hooks reached */
     realmsHooked?: number;
     /** v6: header-agnostic row structures captured / frames text-snapshotted */
