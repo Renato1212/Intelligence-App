@@ -166,6 +166,97 @@ export async function fetchBriefing(date: string): Promise<Briefing> {
   return briefing;
 }
 
+/* ---------- live week calendar for the Catalysts page ---------- */
+
+export interface LiveEventRow {
+  /** YYYY-MM-DD (as reported by the provider) */
+  date: string;
+  name: string;
+  consensus: string | null;
+  previous: string | null;
+  actual: string | null;
+}
+
+/**
+ * Raw US calendar rows for a date range (all impacts), used to attach live
+ * consensus / previous / actual readings to the deterministic calendar.
+ */
+export async function fetchUSCalendarRange(fromISO: string, toISO: string): Promise<{ rows: LiveEventRow[]; error: string | null }> {
+  const key = getMarketApiKey();
+  if (!key) return { rows: [], error: 'no-key' };
+  const urls = [
+    `https://financialmodelingprep.com/stable/economic-calendar?from=${fromISO}&to=${toISO}&apikey=${key}`,
+    `https://financialmodelingprep.com/api/v3/economic_calendar?from=${fromISO}&to=${toISO}&apikey=${key}`,
+  ];
+  let lastStatus = 0;
+  for (const url of urls) {
+    let res: Response;
+    try {
+      res = await fetch(url);
+    } catch {
+      return { rows: [], error: 'Could not reach the market-data service (network/CORS).' };
+    }
+    if (res.ok) {
+      const raw = (await res.json()) as Record<string, unknown>[];
+      const rows = (Array.isArray(raw) ? raw : [])
+        .filter((e) => ['US', 'USA', 'UNITED STATES'].includes(String(e.country ?? '').toUpperCase()))
+        .map((e) => ({
+          date: String(e.date ?? '').slice(0, 10),
+          name: String(e.event ?? ''),
+          consensus: fmtVal(e.estimate),
+          previous: fmtVal(e.previous),
+          actual: fmtVal(e.actual),
+        }))
+        .filter((e) => e.date && e.name);
+      return { rows, error: null };
+    }
+    lastStatus = res.status;
+    if (res.status === 401) break;
+  }
+  return { rows: [], error: planError(lastStatus, 'the economic calendar') };
+}
+
+/** Match provider event names to the deterministic calendar's shorts. */
+const LIVE_MATCHERS: Record<string, RegExp> = {
+  NFP: /non.?farm payrolls(?! private)|nonfarm payrolls$/i,
+  CPI: /\bcpi\b|consumer price/i,
+  PPI: /\bppi\b|producer price/i,
+  'Jobless Claims': /initial jobless|initial claims/i,
+  JOLTS: /jolts?/i,
+  'ISM Mfg': /ism manufacturing/i,
+  'ISM Svcs': /ism (non.?manufacturing|services)/i,
+  'Retail Sales': /retail sales/i,
+  PCE: /\bpce\b/i,
+  FOMC: /fed(eral)? (funds )?(interest )?rate decision|fomc.*(decision|statement)/i,
+  'FOMC Minutes': /fomc minutes/i,
+};
+
+/** Live readings for one calendar event on one date (max 3, most specific first). */
+export function liveReadingsFor(short: string, dateISO: string, rows: LiveEventRow[]): LiveEventRow[] {
+  const rx = LIVE_MATCHERS[short];
+  if (!rx) return [];
+  return rows
+    .filter((r) => r.date === dateISO && rx.test(r.name))
+    .sort((a, b) => {
+      // prefer rows that already have an actual, then MoM/core variants, then shorter names
+      const act = Number(!!b.actual) - Number(!!a.actual);
+      if (act) return act;
+      const rank = (n: string) => (/mom|m\/m/i.test(n) ? 0 : /core/i.test(n) ? 1 : 2);
+      return rank(a.name) - rank(b.name) || a.name.length - b.name.length;
+    })
+    .slice(0, 3);
+}
+
+/** "0.3%" / "185K" / "-12.5" → number (K/M/B multipliers applied), or null. */
+export function parseReading(v: string | null): number | null {
+  if (v == null) return null;
+  const m = String(v).replace(/[,\s]/g, '').match(/^(-?\d+(?:\.\d+)?)(%|K|M|B)?$/i);
+  if (!m) return null;
+  const n = Number(m[1]);
+  const mult = m[2]?.toUpperCase() === 'K' ? 1e3 : m[2]?.toUpperCase() === 'M' ? 1e6 : m[2]?.toUpperCase() === 'B' ? 1e9 : 1;
+  return n * mult;
+}
+
 export function cachedBriefing(date: string): Briefing | null {
   try {
     const raw = localStorage.getItem(CACHE_PREFIX + date);

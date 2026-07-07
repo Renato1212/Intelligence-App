@@ -120,6 +120,23 @@ read paid COT services sell:
   positioning table + confluence list, so your AI analyst sees the market context alongside your
   trades.
 
+### Release intelligence — the data behind every catalyst (free, keyless)
+The Catalysts section doesn't just list NFP and CPI — it shows what each release has actually been
+**printing**, pulled keylessly from DBnomics (the official BLS/ISM data, CORS-open, no account):
+
+- **Print history charts** — 4 years of prints per indicator (payrolls change, unemployment, AHE,
+  headline & core CPI m/m, core CPI y/y, PPI, JOLTS openings, both ISMs), with the ±1σ band and
+  2-year average drawn in and the latest print highlighted — outliers are visible at a glance.
+- **Pre-release read, computed** — z-score of the last print vs the 2-year trend, 3-month vs
+  12-month pace (momentum building or fading), 5-year percentile, consecutive-print streaks and a
+  print-volatility regime check — condensed into one plain-language insight line, plus **your own
+  record** on that event's days from your trade history.
+- **Live consensus → actual** — connect the free FMP key and the week-ahead list carries each
+  event's consensus, refreshing every minute on release days; the actual lands next to it with a
+  deviation arrow the moment it prints. A countdown chip runs on the next scheduled release.
+- Everything caches locally: history keeps working offline, and each indicator degrades
+  independently with an inline note if a source is unreachable.
+
 ### Live day-ahead briefing
 The preparation page can connect a free market-data key (financialmodelingprep.com) and fills
 itself in every morning: today's tier-1 economic events with consensus and previous prints —

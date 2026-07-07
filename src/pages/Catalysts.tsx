@@ -1,11 +1,36 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  ReferenceArea,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 import { PnL, StatTile } from '../components/ui';
 import { domainOf } from '../domain/taxonomy';
 import { db } from '../lib/db';
 import { eventsForDate, localTime, upcomingEvents, type CalendarEvent } from '../lib/calendar';
-import { eventDaySplit, perEventStats, proximitySplit } from '../lib/eventStats';
+import {
+  analyzePrints,
+  fmtPeriod,
+  fmtPrint,
+  indicatorInsight,
+  INDICATORS_BY_EVENT,
+  loadIndicator,
+  NO_HISTORY_NOTE,
+  type IndicatorSeries,
+  type IndicatorSpec,
+  type PrintStats,
+} from '../lib/econData';
+import { eventDaySplit, perEventStats, proximitySplit, type PerEventStat } from '../lib/eventStats';
+import { fetchUSCalendarRange, getMarketApiKey, liveReadingsFor, parseReading, type LiveEventRow } from '../lib/market';
 import { addDays, fmtMoney, todayISO, weekdayName } from '../lib/format';
 
 /** Monday of the week containing `iso`. */
@@ -20,9 +45,61 @@ function impactDot(impact: string) {
   return <span className="grade-dot" style={{ background: impact === 'high' ? 'var(--loss)' : 'var(--dom-news)' }} />;
 }
 
-function EventRow({ e, isNext }: { e: CalendarEvent; isNext: boolean }) {
+/** Re-render every `ms` — for the release countdown. */
+function useNow(ms: number): number {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), ms);
+    return () => window.clearInterval(id);
+  }, [ms]);
+  return now;
+}
+
+function countdown(instant: string, now: number): string | null {
+  const diff = new Date(instant).getTime() - now;
+  if (diff <= 0 || diff > 48 * 3600000) return null;
+  const h = Math.floor(diff / 3600000);
+  const m = Math.floor((diff % 3600000) / 60000);
+  return h > 0 ? `in ${h}h ${String(m).padStart(2, '0')}m` : `in ${m}m`;
+}
+
+/** Live consensus → actual chips for one event row. */
+function LiveChips({ readings }: { readings: LiveEventRow[] }) {
+  if (!readings.length) return null;
+  return (
+    <span className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+      {readings.map((r) => {
+        const a = parseReading(r.actual);
+        const c = parseReading(r.consensus);
+        const dev = a != null && c != null ? a - c : null;
+        return (
+          <span
+            key={r.name}
+            className="chip mono"
+            title={`${r.name} — consensus ${r.consensus ?? '—'} · previous ${r.previous ?? '—'} · actual ${r.actual ?? 'pending'}`}
+            style={{ fontSize: 11, padding: '1px 7px', borderColor: r.actual ? 'var(--gold)' : undefined }}
+          >
+            {r.consensus ?? '—'}
+            {' → '}
+            {r.actual ? (
+              <b style={{ color: dev != null && dev !== 0 ? 'var(--gold)' : undefined }}>
+                {r.actual}
+                {dev != null && dev !== 0 ? (dev > 0 ? ' ▲' : ' ▼') : ''}
+              </b>
+            ) : (
+              <span className="muted">…</span>
+            )}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
+function EventRow({ e, isNext, now, live }: { e: CalendarEvent; isNext: boolean; now: number; live: LiveEventRow[] }) {
   const [open, setOpen] = useState(false);
   const dom = domainOf(e.domain);
+  const cd = isNext ? countdown(e.instant, now) : null;
   return (
     <div
       className="card"
@@ -41,17 +118,19 @@ function EventRow({ e, isNext }: { e: CalendarEvent; isNext: boolean }) {
           {impactDot(e.impact)}
           <span style={{ fontWeight: 600 }}>{e.short}</span>
           <span className="muted small" style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.name}</span>
-          {isNext && <span className="chip" style={{ background: 'var(--gold)', color: '#141210' }}>next</span>}
+          {isNext && <span className="chip" style={{ background: 'var(--gold)', color: '#141210' }}>{cd ?? 'next'}</span>}
         </div>
         <div className="row" style={{ gap: 4, flexShrink: 0 }}>
-          {e.affects.slice(0, 6).map((a) => (
-            <span key={a} className="chip mono" style={{ fontSize: 11, padding: '1px 6px' }}>{a}</span>
-          ))}
+          <LiveChips readings={live} />
+          {live.length === 0 &&
+            e.affects.slice(0, 6).map((a) => (
+              <span key={a} className="chip mono" style={{ fontSize: 11, padding: '1px 6px' }}>{a}</span>
+            ))}
         </div>
       </div>
       {open && (
         <div className="small" style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--hairline)', display: 'grid', gap: 6 }}>
-          <div><b style={{ color: dom?.color }}>{dom?.short ?? e.domain}</b> · {e.cadence}</div>
+          <div><b style={{ color: dom?.color }}>{dom?.short ?? e.domain}</b> · {e.cadence} · moves {e.affects.join(', ')}</div>
           <div><b>Why it matters:</b> <span className="muted">{e.why}</span></div>
           <div><b>How to play it:</b> <span className="muted">{e.playbook}</span></div>
         </div>
@@ -63,7 +142,6 @@ function EventRow({ e, isNext }: { e: CalendarEvent; isNext: boolean }) {
 /** A horizontal timeline of one day's cash-session window with events plotted. */
 function SessionRadar({ date }: { date: string }) {
   const events = eventsForDate(date);
-  // window: 07:00 → 17:00 local, mapped 0–100%
   const startMin = 7 * 60;
   const endMin = 17 * 60;
   const span = endMin - startMin;
@@ -126,6 +204,216 @@ function SessionRadar({ date }: { date: string }) {
   );
 }
 
+/* ------------------------- release intelligence ------------------------- */
+
+/** Print-history bar chart: latest highlighted, mean ±1σ band of the prior 2y. */
+function PrintChart({ series, stats }: { series: IndicatorSeries; stats: PrintStats | null }) {
+  const spec = series.spec;
+  const data = series.points.slice(-48).map((p) => ({ ...p }));
+  const signColored = spec.transform !== 'level';
+  const latestPeriod = data[data.length - 1]?.period;
+  return (
+    <ResponsiveContainer width="100%" height={230}>
+      <BarChart data={data} margin={{ top: 6, right: 12, bottom: 0, left: 4 }} barCategoryGap={1}>
+        <CartesianGrid stroke="#262320" vertical={false} />
+        <XAxis dataKey="period" stroke="transparent" tick={{ fill: '#8a857a', fontSize: 11 }} tickLine={false} minTickGap={46} tickFormatter={fmtPeriod} />
+        <YAxis stroke="transparent" tick={{ fill: '#8a857a', fontSize: 11 }} tickLine={false} width={54} tickFormatter={(v: number) => v.toFixed(spec.decimals)} />
+        {stats?.mean24 != null && stats.sd24 != null && (
+          <ReferenceArea y1={stats.mean24 - stats.sd24} y2={stats.mean24 + stats.sd24} fill="rgba(255,255,255,0.05)" stroke="none" />
+        )}
+        {stats?.mean24 != null && <ReferenceLine y={stats.mean24} stroke="#8a857a" strokeDasharray="4 4" />}
+        <ReferenceLine y={0} stroke="#3a362f" />
+        <Tooltip
+          cursor={{ fill: 'rgba(255,255,255,0.04)' }}
+          content={({ active, payload }) => {
+            if (!active || !payload?.length) return null;
+            const p = payload[0].payload as { period: string; value: number };
+            const z = stats?.mean24 != null && stats.sd24 ? (p.value - stats.mean24) / stats.sd24 : null;
+            return (
+              <div className="viz-tooltip">
+                <div className="tt-title">{fmtPeriod(p.period)}</div>
+                <div className="tt-row"><span>{spec.label}</span><b>{fmtPrint(p.value, spec, true)}</b></div>
+                {z != null && <div className="tt-row"><span>vs 2y trend</span><b>{z >= 0 ? '+' : ''}{z.toFixed(1)}σ</b></div>}
+              </div>
+            );
+          }}
+        />
+        <Bar dataKey="value" radius={[3, 3, 0, 0]} maxBarSize={16} isAnimationActive={false}>
+          {data.map((p) => (
+            <Cell
+              key={p.period}
+              fill={
+                p.period === latestPeriod
+                  ? '#d3a94f'
+                  : signColored
+                    ? p.value >= 0
+                      ? 'rgba(12,163,12,0.75)'
+                      : 'rgba(230,103,103,0.8)'
+                    : 'rgba(57,135,229,0.65)'
+              }
+            />
+          ))}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+/** Events offered in the intelligence panel: everything with history or a note. */
+const INTEL_EVENTS = ['NFP', 'CPI', 'PPI', 'JOLTS', 'ISM Mfg', 'ISM Svcs', 'Jobless Claims', 'Retail Sales', 'PCE', 'FOMC'];
+
+function ReleaseIntel({ record, now }: { record: PerEventStat[]; now: number }) {
+  const today = todayISO();
+  const defaultShort = useMemo(() => {
+    const up = upcomingEvents(today, 14).filter((e) => e.impact === 'high' && INDICATORS_BY_EVENT.has(e.short));
+    return up[0]?.short ?? 'NFP';
+  }, [today]);
+
+  const [short, setShort] = useState(defaultShort);
+  const [indicatorId, setIndicatorId] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState<Record<string, { series: IndicatorSeries | null; error: string | null }>>({});
+  const loading = useRef(new Set<string>());
+
+  const specs = INDICATORS_BY_EVENT.get(short) ?? [];
+  const activeSpec: IndicatorSpec | null = specs.find((s) => s.id === indicatorId) ?? specs[0] ?? null;
+
+  useEffect(() => {
+    setIndicatorId(null);
+    for (const spec of INDICATORS_BY_EVENT.get(short) ?? []) {
+      if (loaded[spec.id] || loading.current.has(spec.id)) continue;
+      loading.current.add(spec.id);
+      void loadIndicator(spec).then((res) => {
+        loading.current.delete(spec.id);
+        setLoaded((m) => ({ ...m, [spec.id]: res }));
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [short]);
+
+  const active = activeSpec ? loaded[activeSpec.id] : undefined;
+  const stats = useMemo(
+    () => (active?.series ? analyzePrints(active.series.points) : null),
+    [active],
+  );
+
+  const nextOccurrence = useMemo(() => {
+    return upcomingEvents(today, 45).find((e) => e.short === short && new Date(e.instant).getTime() > now) ?? null;
+  }, [short, today, now]);
+
+  const myRecord = record.find((r) => r.short === short) ?? null;
+  const note = NO_HISTORY_NOTE[short];
+
+  return (
+    <div className="card">
+      <div className="spread" style={{ alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+        <div className="card-title" style={{ marginBottom: 0 }}>
+          Release intelligence <span className="hint">what the data itself has been printing — official sources, no key needed</span>
+        </div>
+        {nextOccurrence && (
+          <span className="muted small">
+            next {short}: <b style={{ color: 'var(--text)' }}>{weekdayName(nextOccurrence.date)} {nextOccurrence.date.slice(5)}</b> at {localTime(nextOccurrence.instant)}
+            {countdown(nextOccurrence.instant, now) ? <span style={{ color: 'var(--gold)' }}> · {countdown(nextOccurrence.instant, now)}</span> : ''}
+          </span>
+        )}
+      </div>
+
+      <div className="row" style={{ gap: 4, flexWrap: 'wrap', marginBottom: 12 }}>
+        {INTEL_EVENTS.map((s) => (
+          <span key={s} className={`chip clickable ${short === s ? 'selected' : ''}`} onClick={() => setShort(s)}>
+            {s}
+          </span>
+        ))}
+      </div>
+
+      {specs.length === 0 ? (
+        <div className="muted small">{note ?? 'No data series is attached to this event yet.'}</div>
+      ) : (
+        <>
+          {specs.length > 1 && (
+            <div className="row" style={{ gap: 4, flexWrap: 'wrap', marginBottom: 10 }}>
+              {specs.map((s) => (
+                <span
+                  key={s.id}
+                  className={`chip clickable ${activeSpec?.id === s.id ? 'selected' : ''}`}
+                  style={{ fontSize: 11 }}
+                  onClick={() => setIndicatorId(s.id)}
+                >
+                  {s.label}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {!active ? (
+            <div className="muted small">Loading print history…</div>
+          ) : active.series == null ? (
+            <div className="muted small">
+              <b>History unavailable:</b> {active.error} The rest of the page still works — history fills in when the data service is reachable.
+            </div>
+          ) : (
+            <>
+              {active.series.stale && (
+                <div className="muted small" style={{ marginBottom: 8 }}>Showing cached history — the latest refresh failed ({active.error}).</div>
+              )}
+              {stats && activeSpec && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 12 }}>
+                  <StatTile
+                    small
+                    label={`Last print (${fmtPeriod(stats.latest.period)})`}
+                    value={fmtPrint(stats.latest.value, activeSpec, true)}
+                    delta={stats.delta != null ? `${fmtPrint(stats.delta, activeSpec, true)} vs prior` : undefined}
+                  />
+                  <StatTile
+                    small
+                    label="vs 2y trend"
+                    value={stats.z != null ? `${stats.z >= 0 ? '+' : ''}${stats.z.toFixed(1)}σ` : '—'}
+                    valueClass={stats.z != null && Math.abs(stats.z) >= 2 ? 'neg' : undefined}
+                    delta={stats.mean24 != null ? `avg ${fmtPrint(stats.mean24, activeSpec, true)}` : undefined}
+                  />
+                  <StatTile
+                    small
+                    label="3m vs 12m pace"
+                    value={stats.avg12 != null ? `${fmtPrint(stats.avg3, activeSpec, true)} / ${fmtPrint(stats.avg12, activeSpec, true)}` : '—'}
+                    delta={stats.avg12 != null ? (stats.avg3 > stats.avg12 ? 'momentum building' : stats.avg3 < stats.avg12 ? 'momentum fading' : 'flat') : undefined}
+                  />
+                  <StatTile
+                    small
+                    label="5y percentile"
+                    value={stats.pctile5y != null ? `${stats.pctile5y}` : '—'}
+                    delta={Math.abs(stats.streak) >= 3 ? `${Math.abs(stats.streak)} prints ${stats.streak > 0 ? 'higher' : 'lower'} in a row` : undefined}
+                  />
+                </div>
+              )}
+              <PrintChart series={active.series} stats={stats} />
+              <div className="row" style={{ gap: 14, marginTop: 6, flexWrap: 'wrap' }}>
+                <span className="small"><span className="grade-dot" style={{ background: '#d3a94f' }} /> Latest print</span>
+                <span className="small muted">band = ±1σ of the prior 2 years · dashed = 2y average</span>
+              </div>
+              {stats && activeSpec && (
+                <p className="small" style={{ margin: '12px 0 0', color: 'var(--gold)' }}>{indicatorInsight(activeSpec, stats)}</p>
+              )}
+            </>
+          )}
+        </>
+      )}
+
+      <div className="small" style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--hairline)' }}>
+        <b>Your record on {short} days:</b>{' '}
+        {myRecord ? (
+          <span>
+            {myRecord.count} trades over {myRecord.days} days · net <PnL value={myRecord.netPnl} /> · win {(myRecord.winRate * 100).toFixed(0)}% ·
+            expectancy {fmtMoney(myRecord.expectancy, { sign: true })}/trade
+          </span>
+        ) : (
+          <span className="muted">no trades on {short} days yet — your stats appear here once you've traded one.</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------- the page ------------------------------- */
+
 function CompareBar({ label, value, max, money }: { label: string; value: number; max: number; money?: boolean }) {
   const w = max > 0 ? Math.min(100, (Math.abs(value) / max) * 100) : 0;
   const pos = value >= 0;
@@ -147,16 +435,38 @@ export default function Catalysts() {
   const [anchor, setAnchor] = useState(todayISO());
   const nav = useNavigate();
   const trades = useLiveQuery(() => db.trades.toArray(), []) ?? [];
+  const now = useNow(30000);
 
   const ws = weekStart(anchor);
   const weekDays = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(ws, i)), [ws]);
   const today = todayISO();
 
+  // live consensus/actual layer — polls while the viewed week contains today
+  const [liveRows, setLiveRows] = useState<LiveEventRow[]>([]);
+  const [liveError, setLiveError] = useState<string | null>(null);
+  const hasKey = !!getMarketApiKey();
+  const weekHasToday = today >= ws && today <= addDays(ws, 6);
+  useEffect(() => {
+    if (!hasKey) return;
+    let alive = true;
+    const pull = async () => {
+      const res = await fetchUSCalendarRange(ws, addDays(ws, 6));
+      if (!alive) return;
+      if (res.rows.length) setLiveRows(res.rows);
+      setLiveError(res.error);
+    };
+    void pull();
+    const id = weekHasToday ? window.setInterval(pull, 60000) : undefined;
+    return () => {
+      alive = false;
+      if (id) window.clearInterval(id);
+    };
+  }, [ws, hasKey, weekHasToday]);
+
   const nextEventId = useMemo(() => {
     const up = upcomingEvents(today, 10);
-    const now = Date.now();
     return up.find((e) => new Date(e.instant).getTime() >= now)?.id ?? null;
-  }, [today]);
+  }, [today, now]);
 
   const split = useMemo(() => eventDaySplit(trades, 'high'), [trades]);
   const perEvent = useMemo(() => perEventStats(trades), [trades]);
@@ -170,8 +480,8 @@ export default function Catalysts() {
         <div>
           <h1 className="page-title">Catalysts</h1>
           <p className="page-sub">
-            The scheduled volatility that moves your markets — free, always on, and crossed with how you actually
-            trade around it. Times shown in your local zone.
+            The scheduled volatility that moves your markets — with the printed history behind every release,
+            live consensus &amp; actuals, and how you actually trade around it. Times in your local zone.
           </p>
         </div>
         <div className="row">
@@ -184,9 +494,24 @@ export default function Catalysts() {
       <div className="stack">
         <SessionRadar date={today} />
 
+        <ReleaseIntel record={perEvent} now={now} />
+
         <div className="card">
-          <div className="card-title">
-            Week ahead <span className="hint">click an event for why it matters &amp; how to play it</span>
+          <div className="spread" style={{ alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 6 }}>
+            <div className="card-title" style={{ marginBottom: 0 }}>
+              Week ahead <span className="hint">click an event for why it matters &amp; how to play it</span>
+            </div>
+            {hasKey ? (
+              liveError ? (
+                <span className="muted small">live layer: {liveError}</span>
+              ) : (
+                <span className="muted small">
+                  <span className="grade-dot" style={{ background: 'var(--profit)' }} /> live consensus → actual{weekHasToday ? ', refreshing every minute' : ''}
+                </span>
+              )
+            ) : (
+              <span className="muted small">connect a free FMP key in Trading Day → Preparation for live consensus &amp; actuals here</span>
+            )}
           </div>
           <div className="stack" style={{ gap: 14 }}>
             {weekDays.map((d) => {
@@ -207,7 +532,7 @@ export default function Catalysts() {
                   ) : (
                     <div className="stack" style={{ gap: 6 }}>
                       {evs.map((e) => (
-                        <EventRow key={e.id} e={e} isNext={e.id === nextEventId} />
+                        <EventRow key={e.id} e={e} isNext={e.id === nextEventId} now={now} live={liveReadingsFor(e.short, d, liveRows)} />
                       ))}
                     </div>
                   )}
