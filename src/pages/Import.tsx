@@ -151,9 +151,30 @@ export default function ImportPage() {
           </div>
         </div>
 
+        <div className="card" style={{ borderLeft: '3px solid var(--profit)' }}>
+          <div className="card-title">
+            Recommended: Edge Capture browser extension <span className="hint">real-time fills while you trade</span>
+          </div>
+          <p className="muted small" style={{ marginTop: 0 }}>
+            Trader One keeps only the <i>averaged</i> entry/exit for a closed trade — the individual fills (each
+            scale-in/out, its size, price and market/limit type) exist only in the <b>live WebSocket stream while you
+            trade</b>. The <b>Edge Capture extension</b> hooks that stream from the first frame (something a bookmarklet
+            can't do reliably), shows your fills live, and exports an <span className="mono">edge-capture.json</span>{' '}
+            that drops in right here.
+          </p>
+          <ol className="muted small" style={{ margin: '0 0 10px', paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <li>Load the <span className="mono">extension/</span> folder via <b>chrome://extensions → Developer mode → Load unpacked</b> (one-time).</li>
+            <li>Open Trader One — a gold <b>Edge Capture</b> panel appears. <b>Trade with it open</b>; each fill shows live.</li>
+            <li>Click <b>Export</b>, then drop the downloaded file above. Fills become the execution ladder on each trade.</li>
+          </ol>
+          <p className="muted small" style={{ margin: 0 }}>
+            Full install &amp; usage notes are in the extension's <span className="mono">README</span>.
+          </p>
+        </div>
+
         <div className="card" style={{ borderLeft: '3px solid var(--gold)' }}>
           <div className="card-title">
-            Extract from Trader One — Edge Capture <span className="hint">no API, no CSV export needed</span>
+            Or: Edge Capture bookmarklet <span className="hint">imports trades &amp; journal; fills need the extension</span>
           </div>
           <p className="muted small" style={{ marginTop: 0 }}>
             Trader One has no API and no export, so Edge Capture takes the data anyway — two ways at once: it{' '}
