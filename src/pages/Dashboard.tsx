@@ -2,6 +2,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { BucketBarChart, DailyPnlChart, EquityChart, PnlCalendar } from '../components/charts';
+import { CommandCenter } from '../components/CommandCenter';
 import { DomainChip, PnL, SideBadge, StatTile, useToast } from '../components/ui';
 import { DOMAINS, domainOf } from '../domain/taxonomy';
 import { db } from '../lib/db';
@@ -100,6 +101,7 @@ export default function Dashboard() {
       </div>
 
       <div className="stack">
+        <CommandCenter trades={trades ?? []} />
         <div className="grid" style={{ gridTemplateColumns: 'minmax(240px, 1fr) 3fr' }}>
           <div className="card tile" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
             <div className="tile-label">Net P&L</div>
