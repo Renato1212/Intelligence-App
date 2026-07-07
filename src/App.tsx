@@ -11,6 +11,7 @@ import Catalysts from './pages/Catalysts';
 import MarketIntel from './pages/MarketIntel';
 import Journal from './pages/Journal';
 import Analytics from './pages/Analytics';
+import Risk from './pages/Risk';
 import Playbook from './pages/Playbook';
 import Strategies from './pages/Strategies';
 import ImportPage from './pages/Import';
@@ -31,6 +32,7 @@ const I = {
   ai: <path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8M12 8a4 4 0 100 8 4 4 0 000-8z" />,
   catalysts: <path d="M8 2v4M16 2v4M3 9h18M5 4h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2zM12 12v5M9.5 14.5h5" />,
   intel: <path d="M12 2a10 10 0 100 20 10 10 0 000-20zM2 12h20M12 2c2.5 2.6 4 6.2 4 10s-1.5 7.4-4 10c-2.5-2.6-4-6.2-4-10s1.5-7.4 4-10z" />,
+  risk: <path d="M12 2l8 4v6c0 5-3.4 8.5-8 10-4.6-1.5-8-5-8-10V6l8-4zM12 8v4M12 16h.01" />,
   account: <path d="M12 12a4 4 0 100-8 4 4 0 000 8zM4 21c0-4.4 3.6-8 8-8s8 3.6 8 8" />,
 };
 
@@ -102,6 +104,7 @@ function Shell() {
           <div className="nav-section">Performance</div>
           <Nav to="/" icon={I.dashboard} label="Dashboard" end />
           <Nav to="/analytics" icon={I.analytics} label="Edge Analytics" />
+          <Nav to="/risk" icon={I.risk} label="Risk Guardrail" />
           <div className="nav-section">Markets</div>
           <Nav to="/intel" icon={I.intel} label="Market Intel" />
           <Nav to="/catalysts" icon={I.catalysts} label="Catalysts" />
@@ -129,6 +132,7 @@ function Shell() {
             <Route path="/trades/:id" element={<TradeDetail />} />
             <Route path="/journal" element={<Journal />} />
             <Route path="/analytics" element={<Analytics />} />
+            <Route path="/risk" element={<Risk />} />
             <Route path="/playbook" element={<Playbook />} />
             <Route path="/strategies" element={<Strategies />} />
             <Route path="/ai-coach" element={<AICoach />} />
