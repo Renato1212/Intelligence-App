@@ -114,6 +114,11 @@ read paid COT services sell:
   *your own* per-instrument expectancy, ranked by how many independent reads agree — with every
   reason stated explicitly. A negative personal edge on a market is called out as a caution, not
   hidden. Data is cached locally, so the board keeps working offline between weekly reports.
+- **Woven into the workflow** — the Dashboard command center shows the week's focus markets at a
+  glance; every market added to the day-preparation *Overnights* section carries its live
+  positioning read inline (extremes flagged ⚑); and the AI Coach dossier includes the full
+  positioning table + confluence list, so your AI analyst sees the market context alongside your
+  trades.
 
 ### Live day-ahead briefing
 The preparation page can connect a free market-data key (financialmodelingprep.com) and fills

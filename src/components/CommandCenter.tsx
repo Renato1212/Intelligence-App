@@ -4,6 +4,8 @@ import { useNavigate } from 'react-router-dom';
 import type { Trade } from '../domain/types';
 import { db } from '../lib/db';
 import { eventsForDate, localTime } from '../lib/calendar';
+import { buildFocus } from '../lib/confluence';
+import { cachedCot } from '../lib/cot';
 import { fmtMoney, todayISO, weekdayName } from '../lib/format';
 import { rollingExpectancy } from '../lib/stats';
 
@@ -11,6 +13,8 @@ import { rollingExpectancy } from '../lib/stats';
  * The morning command center — the one band that connects the day's plan to
  * the work that matters, so nothing important gets lost:
  *  - today's scheduled catalysts (from the free calendar)
+ *  - the market focus: where positioning, catalysts and the trader's own
+ *    edge line up this week (from Market Intel's confluence engine)
  *  - whether today is prepared
  *  - the review queue: trades still missing a tag / description / grade
  *    (the AXIA discipline is that every rep is tagged and articulated)
@@ -48,6 +52,12 @@ export function CommandCenter({ trades }: { trades: Trade[] }) {
     return { untagged: untagged.length, undescribed: undescribed.length, ungraded: ungraded.length };
   }, [trades]);
 
+  const focus = useMemo(() => {
+    // cached COT only — the command center never blocks on the network
+    const rows = buildFocus(trades, cachedCot(), today).filter((r) => r.confluence >= 1);
+    return { top: rows.slice(0, 3), strong: rows.filter((r) => r.confluence >= 2).length };
+  }, [trades, today]);
+
   const trend = useMemo(() => {
     const roll = rollingExpectancy(trades, Math.min(20, Math.max(5, Math.floor(trades.length / 3) || 5)));
     if (roll.length < 2) return null;
@@ -75,6 +85,21 @@ export function CommandCenter({ trades }: { trades: Trade[] }) {
               </b>
               <div className="muted small">
                 {nextEvent ? <>next <b style={{ color: 'var(--text)' }}>{nextEvent.short}</b> at {localTime(nextEvent.instant)}</> : 'all released for today'}
+              </div>
+            </div>
+          )}
+        </Cell>
+
+        <Cell title="Market focus" accent={focus.strong ? 'var(--gold)' : 'var(--hairline)'} onClick={() => nav('/intel')}>
+          {focus.top.length === 0 ? (
+            <div><b style={{ fontSize: 20 }}>—</b><div className="muted small">Open Market Intel to pull positioning.</div></div>
+          ) : (
+            <div>
+              <b style={{ fontSize: 20 }} className="mono">{focus.top.map((r) => r.symbol).join(' · ')}</b>
+              <div className="muted small">
+                {focus.strong
+                  ? `${focus.strong} market${focus.strong > 1 ? 's' : ''} with 2+ reads aligned this week`
+                  : 'positioning × catalysts × your edge'}
               </div>
             </div>
           )}

@@ -80,6 +80,22 @@ export function cotMarketFor(symbolRoot: string): CotMarket | null {
   return BY_SYMBOL.get(symbolRoot.toUpperCase()) ?? null;
 }
 
+/**
+ * COT market for a human market label as used in day preparation —
+ * "Gold (GC)", "Dollar / DXY", "VIX", "10y Notes (ZN)" …
+ */
+export function cotMarketForLabel(label: string): CotMarket | null {
+  const paren = label.match(/\(([A-Z0-9]{1,4})\)/i);
+  if (paren) {
+    const m = cotMarketFor(paren[1]);
+    if (m) return m;
+  }
+  const upper = label.toUpperCase().trim();
+  if (upper.includes('DXY') || upper.includes('DOLLAR')) return cotMarketFor('DX');
+  if (upper.includes('VIX')) return cotMarketFor('VX');
+  return cotMarketFor(upper);
+}
+
 export interface CotWeek {
   /** report (Tuesday) date, YYYY-MM-DD */
   date: string;
