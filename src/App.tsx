@@ -8,6 +8,7 @@ import Trades from './pages/Trades';
 import TradeDetail from './pages/TradeDetail';
 import TradingDay from './pages/TradingDay';
 import Catalysts from './pages/Catalysts';
+import MarketIntel from './pages/MarketIntel';
 import Journal from './pages/Journal';
 import Analytics from './pages/Analytics';
 import Playbook from './pages/Playbook';
@@ -29,6 +30,7 @@ const I = {
   settings: <path d="M12 9a3 3 0 100 6 3 3 0 000-6zM19 12a7 7 0 01-.1 1.2l2 1.6-2 3.4-2.4-1a7 7 0 01-2 1.2L14 21h-4l-.5-2.6a7 7 0 01-2-1.2l-2.4 1-2-3.4 2-1.6A7 7 0 015 12a7 7 0 01.1-1.2l-2-1.6 2-3.4 2.4 1a7 7 0 012-1.2L10 3h4l.5 2.6a7 7 0 012 1.2l2.4-1 2 3.4-2 1.6a7 7 0 01.1 1.2z" />,
   ai: <path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8M12 8a4 4 0 100 8 4 4 0 000-8z" />,
   catalysts: <path d="M8 2v4M16 2v4M3 9h18M5 4h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2zM12 12v5M9.5 14.5h5" />,
+  intel: <path d="M12 2a10 10 0 100 20 10 10 0 000-20zM2 12h20M12 2c2.5 2.6 4 6.2 4 10s-1.5 7.4-4 10c-2.5-2.6-4-6.2-4-10s1.5-7.4 4-10z" />,
   account: <path d="M12 12a4 4 0 100-8 4 4 0 000 8zM4 21c0-4.4 3.6-8 8-8s8 3.6 8 8" />,
 };
 
@@ -100,8 +102,10 @@ function Shell() {
           <div className="nav-section">Performance</div>
           <Nav to="/" icon={I.dashboard} label="Dashboard" end />
           <Nav to="/analytics" icon={I.analytics} label="Edge Analytics" />
-          <div className="nav-section">Journal</div>
+          <div className="nav-section">Markets</div>
+          <Nav to="/intel" icon={I.intel} label="Market Intel" />
           <Nav to="/catalysts" icon={I.catalysts} label="Catalysts" />
+          <div className="nav-section">Journal</div>
           <Nav to="/day" icon={I.day} label="Trading Day" />
           <Nav to="/trades" icon={I.trades} label="Trades" />
           <Nav to="/journal" icon={I.journal} label="Daily Debrief" />
@@ -120,6 +124,7 @@ function Shell() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/day" element={<TradingDay />} />
             <Route path="/catalysts" element={<Catalysts />} />
+            <Route path="/intel" element={<MarketIntel />} />
             <Route path="/trades" element={<Trades />} />
             <Route path="/trades/:id" element={<TradeDetail />} />
             <Route path="/journal" element={<Journal />} />

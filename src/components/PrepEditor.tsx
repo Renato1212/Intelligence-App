@@ -1,6 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { DayPrep, Hypothesis, PrepEvent } from '../domain/types';
+import { analyzeSeries, cotMarketForLabel, loadCot, ordinal, type CotAnalysis, type CotSnapshot } from '../lib/cot';
 import { db, emptyPrep } from '../lib/db';
 import { DayCatalysts } from './DayCatalysts';
 import { MarketBriefing } from './MarketBriefing';
@@ -8,6 +9,28 @@ import { MediaEditor, VideoField } from './media';
 import { useToast } from './ui';
 
 const HYP_COLORS: Record<string, string> = { 'H1 Red': '#e66767', 'H2 Blue': '#3987e5', 'H3 Green': '#0ca30c' };
+
+function fmtContracts(v: number): string {
+  const abs = Math.abs(v);
+  const s = abs >= 1000 ? `${(abs / 1000).toFixed(abs >= 100000 ? 0 : 1)}k` : String(Math.round(abs));
+  return `${v < 0 ? '−' : '+'}${s}`;
+}
+
+/** One-line COT positioning context for an overnight market, from the cached weekly report. */
+function PositioningHint({ a }: { a: CotAnalysis }) {
+  const p = a.pctile3y;
+  const extreme = p != null && (p >= 90 || p <= 10);
+  return (
+    <span
+      className="small mono"
+      title="Large speculators' net futures position (CFTC COT, weekly) and where it sits in the 3-year range — from Market Intel"
+      style={{ color: extreme ? 'var(--gold)' : 'var(--muted)', fontWeight: extreme ? 600 : 400 }}
+    >
+      specs {fmtContracts(a.specNet)}
+      {p != null && <> · {ordinal(p)} pctile 3y{extreme ? ' ⚑' : ''}</>}
+    </span>
+  );
+}
 
 /** Common futures markets offered as one-click additions — any custom market can be typed in too. */
 const MARKET_SUGGESTIONS = [
@@ -42,7 +65,25 @@ export function PrepEditor({ date }: { date: string }) {
   const existing = useLiveQuery(() => db.preps.where('date').equals(date).first(), [date]);
   const [draft, setDraft] = useState<DayPrep>(emptyPrep(date));
   const [customMarket, setCustomMarket] = useState('');
+  const [cot, setCot] = useState<CotSnapshot | null>(null);
   const toast = useToast();
+
+  // positioning context for the overnights (cached-first; refreshes silently)
+  useEffect(() => {
+    let alive = true;
+    void loadCot(false).then((r) => alive && r.snapshot && setCot(r.snapshot));
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const positioning = useMemo(() => {
+    const map = new Map<string, CotAnalysis>();
+    for (const s of cot?.series ?? []) {
+      const a = analyzeSeries(s);
+      if (a) map.set(a.market.symbol, a);
+    }
+    return map;
+  }, [cot]);
 
   useEffect(() => {
     setDraft(existing ? { ...emptyPrep(date), ...existing } : emptyPrep(date));
@@ -115,10 +156,16 @@ export function PrepEditor({ date }: { date: string }) {
         </div>
         {draft.overnightMarkets.length > 0 && (
           <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
-            {draft.overnightMarkets.map((m, i) => (
+            {draft.overnightMarkets.map((m, i) => {
+              const cm = cotMarketForLabel(m.market);
+              const a = cm ? positioning.get(cm.symbol) : undefined;
+              return (
               <label key={i} className="field">
                 <span className="spread">
-                  {m.market}
+                  <span className="row" style={{ gap: 8, alignItems: 'baseline', minWidth: 0 }}>
+                    {m.market}
+                    {a && <PositioningHint a={a} />}
+                  </span>
                   <span
                     style={{ cursor: 'pointer', color: 'var(--muted)' }}
                     title="Remove market"
@@ -139,7 +186,8 @@ export function PrepEditor({ date }: { date: string }) {
                   placeholder="Moved significantly? Read?"
                 />
               </label>
-            ))}
+              );
+            })}
           </div>
         )}
         <div className="grid grid-2">

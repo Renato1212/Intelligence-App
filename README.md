@@ -98,6 +98,28 @@ every daily debrief and every preparation with its hypotheses — sized for past
 Claude, ChatGPT or Gemini. Ready-made prompts find hidden patterns, audit your scaling decisions,
 grade you like an AXIA coach, and build next week's plan.
 
+### Market Intel — who is positioned where (free, keyless)
+The CFTC publishes every trader group's futures positioning weekly through a public API that needs
+no key and no account. Market Intel pulls three years of Commitments of Traders history for ~30
+futures (ES, NQ, ZN, 6E, CL, GC, BTC …) straight from the trader's browser and turns it into the
+read paid COT services sell:
+
+- **Positioning board** — large speculators' net position per market, week-over-week change, where
+  it sits in the 3-year range (percentile), a 1-year trend sparkline, and signal chips for
+  multi-year extremes, top-decile weekly shifts and net flips.
+- **Full market read** — click any market for the 3-year large-spec vs commercial net chart, open
+  interest, and a one-line interpretation in trader language (crowded long, drained shorts,
+  regime-change flips…).
+- **This week's focus** — the idea engine. Positioning extremes × this week's tier-1 catalysts ×
+  *your own* per-instrument expectancy, ranked by how many independent reads agree — with every
+  reason stated explicitly. A negative personal edge on a market is called out as a caution, not
+  hidden. Data is cached locally, so the board keeps working offline between weekly reports.
+- **Woven into the workflow** — the Dashboard command center shows the week's focus markets at a
+  glance; every market added to the day-preparation *Overnights* section carries its live
+  positioning read inline (extremes flagged ⚑); and the AI Coach dossier includes the full
+  positioning table + confluence list, so your AI analyst sees the market context alongside your
+  trades.
+
 ### Live day-ahead briefing
 The preparation page can connect a free market-data key (financialmodelingprep.com) and fills
 itself in every morning: today's tier-1 economic events with consensus and previous prints —

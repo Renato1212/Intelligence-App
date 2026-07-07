@@ -1,6 +1,8 @@
 import { CRITERIA, categoryLabel, domainOf } from '../domain/taxonomy';
+import { buildFocus } from './confluence';
+import { analyzeSeries, cachedCot, FLAG_LABEL } from './cot';
 import { db } from './db';
-import { fmtMoney, fmtPct } from './format';
+import { fmtMoney, fmtPct, todayISO } from './format';
 import { bucketStats, computeStats, gradeProfile, hourOfTrade } from './stats';
 
 /**
@@ -74,6 +76,23 @@ Generated ${new Date().toISOString().slice(0, 16).replace('T', ' ')} · framewor
         ? `Sample: ${ls.count} trades · net ${fmtMoney(ls.netPnl, { sign: true })} · win ${fmtPct(ls.winRate, 0)} · expectancy ${fmtMoney(ls.expectancy, { sign: true })}\n\n`
         : `Sample: no linked trades yet\n\n`;
     }
+  }
+
+  // current market positioning context (CFTC COT, cached from Market Intel)
+  const cot = cachedCot();
+  if (cot?.reportDate && cot.series.length) {
+    md += `## Market positioning context (CFTC Commitments of Traders, report ${cot.reportDate})\nLarge speculators' net futures position; percentile = where the latest net sits in its 3-year weekly range.\n| Market | Specs net | Δ week | 3y pctile | Signals |\n| --- | --- | --- | --- | --- |\n`;
+    for (const series of cot.series) {
+      const a = analyzeSeries(series);
+      if (!a) continue;
+      md += `| ${a.market.symbol} ${a.market.label} | ${a.specNet.toLocaleString()} | ${a.specWow >= 0 ? '+' : ''}${a.specWow.toLocaleString()} | ${a.pctile3y ?? '—'} | ${a.flags.map((f) => FLAG_LABEL[f]).join(', ') || '—'} |\n`;
+    }
+    const focus = buildFocus(trades, cot, todayISO()).filter((r) => r.confluence >= 1).slice(0, 8);
+    if (focus.length) {
+      md += `\nThis week's confluence (positioning × scheduled catalysts × this trader's own per-instrument edge):\n`;
+      for (const r of focus) md += `- ${r.symbol} (${r.confluence}/3 reads): ${r.reasons.join(' · ')}\n`;
+    }
+    md += '\n';
   }
 
   md += `## Trade log (chronological)\nFormat: date time | instrument side qty | entry→exit | P&L (R) | domain/category | tags | fills\n\n`;
