@@ -2,6 +2,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useState } from 'react';
 import type { DayPrep, Hypothesis, PrepEvent } from '../domain/types';
 import { db, emptyPrep } from '../lib/db';
+import { DayCatalysts } from './DayCatalysts';
 import { MarketBriefing } from './MarketBriefing';
 import { MediaEditor, VideoField } from './media';
 import { useToast } from './ui';
@@ -79,6 +80,8 @@ export function PrepEditor({ date }: { date: string }) {
           </span>
         ))}
       </div>
+
+      <DayCatalysts date={date} />
 
       <MarketBriefing date={date} />
 
