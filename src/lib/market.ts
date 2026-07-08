@@ -103,8 +103,13 @@ async function fetchEvents(date: string, key: string): Promise<{ events: EconEve
         })
         .map((e) => {
           const dt = String(e.date ?? '');
+          // the provider reports timestamps in UTC — render in the viewer's zone
+          const instant = dt.length >= 16 ? new Date(dt.replace(' ', 'T') + 'Z') : null;
+          const local = instant && !isNaN(instant.getTime())
+            ? `${String(instant.getHours()).padStart(2, '0')}:${String(instant.getMinutes()).padStart(2, '0')}`
+            : dt.slice(11, 16);
           return {
-            time: dt.length >= 16 ? dt.slice(11, 16) : '',
+            time: local,
             dateTime: dt,
             name: String(e.event ?? ''),
             country: String(e.country ?? '').toUpperCase(),
@@ -177,6 +182,58 @@ export interface LiveEventRow {
   actual: string | null;
 }
 
+/* Cached provider rows per fetched range, so date reconciliation (reconcile.ts)
+ * works everywhere in the app without extra requests. Kept small (last 8 ranges). */
+const LIVECAL_CACHE_KEY = 'ei-livecal-cache-v1';
+const LIVECAL_FRESH_MS = 18 * 3600 * 1000;
+
+interface LiveCalRange {
+  fetchedAt: string;
+  from: string;
+  to: string;
+  rows: LiveEventRow[];
+}
+
+let liveCalMemo: { at: number; value: LiveCalRange[] } | null = null;
+
+function readLiveCalCache(): LiveCalRange[] {
+  if (liveCalMemo && Date.now() - liveCalMemo.at < 5000) return liveCalMemo.value;
+  let value: LiveCalRange[] = [];
+  try {
+    const v = JSON.parse(localStorage.getItem(LIVECAL_CACHE_KEY) ?? '[]') as LiveCalRange[];
+    value = Array.isArray(v) ? v : [];
+  } catch {
+    value = [];
+  }
+  liveCalMemo = { at: Date.now(), value };
+  return value;
+}
+
+function storeLiveCalRange(entry: LiveCalRange): void {
+  try {
+    const rest = readLiveCalCache().filter((r) => !(r.from === entry.from && r.to === entry.to));
+    rest.push(entry);
+    rest.sort((a, b) => b.fetchedAt.localeCompare(a.fetchedAt));
+    localStorage.setItem(LIVECAL_CACHE_KEY, JSON.stringify(rest.slice(0, 8)));
+    liveCalMemo = null;
+  } catch {
+    // best effort
+  }
+}
+
+/**
+ * Cached provider rows covering a date, if a fresh fetched range includes it.
+ * `covered: false` means we simply don't know — never treat it as "no events".
+ */
+export function cachedRowsCovering(dateISO: string): { covered: boolean; from: string; to: string; rows: LiveEventRow[] } {
+  for (const r of readLiveCalCache()) {
+    if (r.from <= dateISO && dateISO <= r.to && Date.now() - new Date(r.fetchedAt).getTime() < LIVECAL_FRESH_MS && r.rows.length >= 8) {
+      return { covered: true, from: r.from, to: r.to, rows: r.rows };
+    }
+  }
+  return { covered: false, from: '', to: '', rows: [] };
+}
+
 /**
  * Raw US calendar rows for a date range (all impacts), used to attach live
  * consensus / previous / actual readings to the deterministic calendar.
@@ -208,12 +265,24 @@ export async function fetchUSCalendarRange(fromISO: string, toISO: string): Prom
           actual: fmtVal(e.actual),
         }))
         .filter((e) => e.date && e.name);
+      if (rows.length >= 8) storeLiveCalRange({ fetchedAt: new Date().toISOString(), from: fromISO, to: toISO, rows });
       return { rows, error: null };
     }
     lastStatus = res.status;
     if (res.status === 401) break;
   }
   return { rows: [], error: planError(lastStatus, 'the economic calendar') };
+}
+
+/** Rows for one calendar short across a whole row set (any date). */
+export function rowsMatching(short: string, rows: LiveEventRow[]): LiveEventRow[] {
+  const rx = LIVE_MATCHERS[short];
+  return rx ? rows.filter((r) => rx.test(r.name)) : [];
+}
+
+/** Whether the provider feed can confirm/deny this event type at all. */
+export function hasLiveMatcher(short: string): boolean {
+  return !!LIVE_MATCHERS[short];
 }
 
 /** Match provider event names to the deterministic calendar's shorts. */

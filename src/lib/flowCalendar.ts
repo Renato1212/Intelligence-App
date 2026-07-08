@@ -64,7 +64,7 @@ interface FlowTemplate {
   playbook: string;
 }
 
-function make(t: FlowTemplate, y: number, m: number, d: number, hh: number, mm: number): CalendarEvent {
+function make(t: FlowTemplate, y: number, m: number, d: number, hh: number, mm: number, approx = false): CalendarEvent {
   return {
     id: `${t.short}-${ymd(y, m, d)}`,
     date: ymd(y, m, d),
@@ -78,6 +78,7 @@ function make(t: FlowTemplate, y: number, m: number, d: number, hh: number, mm: 
     why: t.why,
     playbook: t.playbook,
     cadence: 'monthly',
+    approx,
   };
 }
 
@@ -173,7 +174,7 @@ export function flowEventsForMonth(y: number, m: number): CalendarEvent[] {
 
   // typical mid-month coupon auction anchor: Wednesday of the 2nd full week (10y day)
   const secondWed = nthWeekday(y, m, 3, 2);
-  if (secondWed > 0) ev.push(make(T.auctionMid, y, m, secondWed, 13, 0));
+  if (secondWed > 0) ev.push(make(T.auctionMid, y, m, secondWed, 13, 0, true));
 
   return ev.sort((a, b) => a.instant.localeCompare(b.instant));
 }

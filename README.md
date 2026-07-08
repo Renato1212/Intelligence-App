@@ -160,6 +160,12 @@ The Catalysts section doesn't just list NFP and CPI — it shows what each relea
   deviation arrow the moment it prints. A countdown chip runs on the next scheduled release.
 - Everything caches locally: history keeps working offline, and each indicator degrades
   independently with an inline note if a source is unreachable.
+- **Honest dates** — releases whose exact date shifts month to month (CPI, PPI, Retail, JOLTS,
+  PCE, auction weeks) are computed as *estimates* and clearly marked **~ est.** offline. With the
+  free market-data key connected, the calendar **reconciles them automatically**: confirmed dates
+  lose the marker, mis-anchored estimates move to their real day, and releases that aren't
+  scheduled that period disappear instead of showing as phantoms. Fixed-rule events (NFP incl.
+  the July-4th shift, claims, FOMC, ISM, OPEX/witching/rebalancing) are exact.
 
 ### Live day-ahead briefing
 The preparation page can connect a free market-data key (financialmodelingprep.com) and fills
