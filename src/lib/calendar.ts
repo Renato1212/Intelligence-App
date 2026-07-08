@@ -42,6 +42,13 @@ export interface CalendarEvent {
   playbook: string;
   /** Roughly how often it recurs, for the UI */
   cadence: 'weekly' | 'monthly' | 'scheduled' | '6-weekly';
+  /**
+   * True when the DATE is estimated from the typical schedule rather than
+   * derived from a fixed rule (CPI, PPI, Retail, JOLTS, PCE, auction weeks).
+   * The UI marks these and, when a live calendar source is available,
+   * reconciles them to the confirmed date (see reconcile.ts).
+   */
+  approx?: boolean;
 }
 
 /* ---------- date helpers (all in terms of a UTC calendar date) ---------- */
@@ -91,7 +98,7 @@ function etOffset(y: number, m: number, d: number): number {
   return isUSDST(y, m, d) ? -4 : -5;
 }
 /** Build the UTC instant for an ET wall-clock time on a given date. */
-function etInstant(y: number, m: number, d: number, hh: number, mm: number): string {
+export function etInstant(y: number, m: number, d: number, hh: number, mm: number): string {
   const off = etOffset(y, m, d);
   // wall ET = UTC + off  →  UTC = wall - off
   return new Date(Date.UTC(y, m, d, hh - off, mm)).toISOString();
@@ -185,7 +192,7 @@ const T = {
   },
 } satisfies Record<string, Template>;
 
-function make(tpl: Template, y: number, m: number, d: number, hh: number, mm: number, cadence: CalendarEvent['cadence']): CalendarEvent {
+function make(tpl: Template, y: number, m: number, d: number, hh: number, mm: number, cadence: CalendarEvent['cadence'], approx = false): CalendarEvent {
   return {
     id: `${tpl.short}-${ymd(y, m, d)}`,
     date: ymd(y, m, d),
@@ -199,6 +206,7 @@ function make(tpl: Template, y: number, m: number, d: number, hh: number, mm: nu
     why: tpl.why,
     playbook: tpl.playbook,
     cadence,
+    approx,
   };
 }
 
@@ -206,39 +214,46 @@ function make(tpl: Template, y: number, m: number, d: number, hh: number, mm: nu
 export function eventsForMonth(y: number, m: number): CalendarEvent[] {
   const ev: CalendarEvent[] = [];
 
-  // NFP + ISM Manufacturing: NFP = first Friday 08:30; if first Friday is the
-  // 1st-3rd it may slip, but first-Friday is the standard rule.
-  const firstFri = nthWeekday(y, m, 5, 1);
-  if (firstFri > 0) ev.push(make(T.nfp, y, m, firstFri, 8, 30, 'monthly'));
+  // NFP: first Friday 08:30. Around July 4th the BLS moves the release to the
+  // preceding Thursday when the first Friday is the (observed) holiday.
+  let nfpDay = nthWeekday(y, m, 5, 1);
+  if (m === 6 && (nfpDay === 3 || nfpDay === 4)) nfpDay -= 1; // Jul 3 observed / Jul 4 holiday
+  if (nfpDay > 0) ev.push(make(T.nfp, y, m, nfpDay, 8, 30, 'monthly'));
 
-  // ISM Manufacturing: 1st business day; ISM Services: 3rd business day (10:00 ET)
+  // ISM Manufacturing: 1st business day; ISM Services: 3rd business day (10:00 ET).
+  // Jan 1 is a market holiday, so January's count starts on the 2nd.
   let bd = 0;
   for (let d = 1; d <= daysInMonth(y, m); d++) {
     const w = dowUTC(y, m, d);
     if (w === 0 || w === 6) continue;
+    if (m === 0 && d === 1) continue; // New Year's Day
     bd++;
     if (bd === 1) ev.push(make(T.ism_mfg, y, m, d, 10, 0, 'monthly'));
     if (bd === 3) { ev.push(make(T.ism_svc, y, m, d, 10, 0, 'monthly')); break; }
   }
 
-  // CPI ~ 2nd week (business day 8-10 area); we anchor to the 2nd Wednesday
-  // 08:30 as a robust deterministic proxy (BLS typically mid-month, Tue-Thu).
-  const cpiDay = nthWeekday(y, m, 3, 2); // 2nd Wednesday
-  if (cpiDay > 0) ev.push(make(T.cpi, y, m, cpiDay, 8, 30, 'monthly'));
-  // PPI usually the day after CPI
-  if (cpiDay > 0 && cpiDay + 1 <= daysInMonth(y, m)) ev.push(make(T.ppi, y, m, cpiDay + 1, 8, 30, 'monthly'));
+  // The following dates are ESTIMATES anchored to the typical pattern — the
+  // agencies shift them by a few days month to month, so they carry
+  // approx: true and get reconciled to the confirmed date when a live
+  // calendar source is connected (reconcile.ts).
 
-  // Retail Sales ~ mid-month, anchor to 3rd Tuesday 08:30
+  // CPI ~ mid-month (BLS, usually Tue–Thu around the 10th–15th)
+  const cpiDay = nthWeekday(y, m, 3, 2); // 2nd Wednesday as anchor
+  if (cpiDay > 0) ev.push(make(T.cpi, y, m, cpiDay, 8, 30, 'monthly', true));
+  // PPI usually lands the day around CPI
+  if (cpiDay > 0 && cpiDay + 1 <= daysInMonth(y, m)) ev.push(make(T.ppi, y, m, cpiDay + 1, 8, 30, 'monthly', true));
+
+  // Retail Sales ~ mid-month
   const retailDay = nthWeekday(y, m, 2, 3);
-  if (retailDay > 0) ev.push(make(T.retail, y, m, retailDay, 8, 30, 'monthly'));
+  if (retailDay > 0) ev.push(make(T.retail, y, m, retailDay, 8, 30, 'monthly', true));
 
-  // JOLTS ~ first week (anchor first business Tuesday, 10:00)
+  // JOLTS ~ turn of the month
   const joltsDay = nthWeekday(y, m, 2, 1);
-  if (joltsDay > 0) ev.push(make(T.jolts, y, m, joltsDay, 10, 0, 'monthly'));
+  if (joltsDay > 0) ev.push(make(T.jolts, y, m, joltsDay, 10, 0, 'monthly', true));
 
-  // Core PCE ~ last week (anchor 4th Friday, 08:30)
+  // Core PCE ~ late month
   const pceDay = nthWeekday(y, m, 5, 4);
-  if (pceDay > 0) ev.push(make(T.pce, y, m, pceDay, 8, 30, 'monthly'));
+  if (pceDay > 0) ev.push(make(T.pce, y, m, pceDay, 8, 30, 'monthly', true));
 
   // Weekly initial jobless claims: every Thursday 08:30
   for (const d of allWeekdays(y, m, 4)) ev.push(make(T.claims, y, m, d, 8, 30, 'weekly'));

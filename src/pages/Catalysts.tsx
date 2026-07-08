@@ -16,7 +16,8 @@ import {
 import { PnL, StatTile } from '../components/ui';
 import { domainOf } from '../domain/taxonomy';
 import { db } from '../lib/db';
-import { eventsForDate, localTime, upcomingEvents, type CalendarEvent } from '../lib/calendar';
+import { eventsForDate, localTime, type CalendarEvent } from '../lib/calendar';
+import { reconcileDay, reconciledEventsForDate, reconciledUpcoming } from '../lib/reconcile';
 import {
   analyzePrints,
   fmtPeriod,
@@ -113,10 +114,13 @@ function EventRow({ e, isNext, now, live }: { e: CalendarEvent; isNext: boolean;
     >
       <div className="spread" style={{ gap: 10, alignItems: 'center' }}>
         <div className="row" style={{ gap: 10, alignItems: 'center', minWidth: 0 }}>
-          <span className="mono" style={{ fontWeight: 700, width: 46 }}>{localTime(e.instant)}</span>
+          <span className="mono" style={{ fontWeight: 700, width: 46 }} title={e.approx ? 'Estimated date — the agency shifts this release month to month. Connect the free FMP key and dates auto-confirm.' : undefined}>
+            {e.approx ? '~' : ''}{localTime(e.instant)}
+          </span>
           <span className="muted small" style={{ width: 58 }}>{e.timeET} ET</span>
           {impactDot(e.impact)}
           <span style={{ fontWeight: 600 }}>{e.short}</span>
+          {e.approx && <span className="chip" style={{ fontSize: 10, padding: '0 5px', color: 'var(--muted)' }} title="Estimated date — confirm before trading it">est.</span>}
           <span className="muted small" style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.name}</span>
           {isNext && <span className="chip" style={{ background: 'var(--gold)', color: '#141210' }}>{cd ?? 'next'}</span>}
         </div>
@@ -131,6 +135,7 @@ function EventRow({ e, isNext, now, live }: { e: CalendarEvent; isNext: boolean;
       {open && (
         <div className="small" style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--hairline)', display: 'grid', gap: 6 }}>
           <div><b style={{ color: dom?.color }}>{dom?.short ?? e.domain}</b> · {e.cadence} · moves {e.affects.join(', ')}</div>
+          {e.approx && <div style={{ color: 'var(--gold)' }}>Date is estimated from this release's typical slot — the agency's exact date varies. With the free market-data key connected, the calendar confirms or moves it automatically.</div>}
           <div><b>Why it matters:</b> <span className="muted">{e.why}</span></div>
           <div><b>How to play it:</b> <span className="muted">{e.playbook}</span></div>
         </div>
@@ -140,8 +145,7 @@ function EventRow({ e, isNext, now, live }: { e: CalendarEvent; isNext: boolean;
 }
 
 /** A horizontal timeline of one day's cash-session window with events plotted. */
-function SessionRadar({ date }: { date: string }) {
-  const events = eventsForDate(date);
+function SessionRadar({ events }: { events: CalendarEvent[] }) {
   const startMin = 7 * 60;
   const endMin = 17 * 60;
   const span = endMin - startMin;
@@ -265,7 +269,7 @@ const INTEL_EVENTS = ['NFP', 'CPI', 'PPI', 'JOLTS', 'ISM Mfg', 'ISM Svcs', 'Jobl
 function ReleaseIntel({ record, now }: { record: PerEventStat[]; now: number }) {
   const today = todayISO();
   const defaultShort = useMemo(() => {
-    const up = upcomingEvents(today, 14).filter((e) => e.impact === 'high' && INDICATORS_BY_EVENT.has(e.short));
+    const up = reconciledUpcoming(today, 14).filter((e) => e.impact === 'high' && INDICATORS_BY_EVENT.has(e.short));
     return up[0]?.short ?? 'NFP';
   }, [today]);
 
@@ -297,7 +301,7 @@ function ReleaseIntel({ record, now }: { record: PerEventStat[]; now: number }) 
   );
 
   const nextOccurrence = useMemo(() => {
-    return upcomingEvents(today, 45).find((e) => e.short === short && new Date(e.instant).getTime() > now) ?? null;
+    return reconciledUpcoming(today, 45).find((e) => e.short === short && new Date(e.instant).getTime() > now) ?? null;
   }, [short, today, now]);
 
   const myRecord = record.find((r) => r.short === short) ?? null;
@@ -311,7 +315,7 @@ function ReleaseIntel({ record, now }: { record: PerEventStat[]; now: number }) 
         </div>
         {nextOccurrence && (
           <span className="muted small">
-            next {short}: <b style={{ color: 'var(--text)' }}>{weekdayName(nextOccurrence.date)} {nextOccurrence.date.slice(5)}</b> at {localTime(nextOccurrence.instant)}
+            next {short}: <b style={{ color: 'var(--text)' }}>{nextOccurrence.approx ? '~' : ''}{weekdayName(nextOccurrence.date)} {nextOccurrence.date.slice(5)}</b> at {localTime(nextOccurrence.instant)}{nextOccurrence.approx ? ' (est.)' : ''}
             {countdown(nextOccurrence.instant, now) ? <span style={{ color: 'var(--gold)' }}> · {countdown(nextOccurrence.instant, now)}</span> : ''}
           </span>
         )}
@@ -463,10 +467,18 @@ export default function Catalysts() {
     };
   }, [ws, hasKey, weekHasToday]);
 
+  // day views reconcile estimated dates against the live rows (or their cache)
+  const dayEvents = useMemo(() => {
+    return (d: string): CalendarEvent[] =>
+      liveRows.length >= 8 && d >= ws && d <= addDays(ws, 6)
+        ? reconcileDay(d, eventsForDate(d), liveRows, ws, addDays(ws, 6))
+        : reconciledEventsForDate(d).events;
+  }, [liveRows, ws]);
+
   const nextEventId = useMemo(() => {
-    const up = upcomingEvents(today, 10);
-    return up.find((e) => new Date(e.instant).getTime() >= now)?.id ?? null;
-  }, [today, now]);
+    return reconciledUpcoming(today, 10).find((e) => new Date(e.instant).getTime() >= now)?.id ?? null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [today, now, liveRows]);
 
   const split = useMemo(() => eventDaySplit(trades, 'high'), [trades]);
   const perEvent = useMemo(() => perEventStats(trades), [trades]);
@@ -492,7 +504,7 @@ export default function Catalysts() {
       </div>
 
       <div className="stack">
-        <SessionRadar date={today} />
+        <SessionRadar events={dayEvents(today)} />
 
         <ReleaseIntel record={perEvent} now={now} />
 
@@ -515,7 +527,7 @@ export default function Catalysts() {
           </div>
           <div className="stack" style={{ gap: 14 }}>
             {weekDays.map((d) => {
-              const evs = eventsForDate(d);
+              const evs = dayEvents(d);
               const isToday = d === today;
               return (
                 <div key={d}>

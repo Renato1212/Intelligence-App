@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { domainOf } from '../domain/taxonomy';
-import { eventsForDate, localTime, type CalendarEvent } from '../lib/calendar';
+import { localTime, type CalendarEvent } from '../lib/calendar';
+import { reconciledEventsForDate } from '../lib/reconcile';
 
 /**
  * Free, always-on catalysts for the preparation day — no API key. Computed
@@ -15,9 +16,12 @@ function Row({ e }: { e: CalendarEvent }) {
     <div style={{ borderLeft: `3px solid ${dom?.color ?? 'var(--muted)'}`, paddingLeft: 10 }}>
       <div className="spread" style={{ gap: 8, alignItems: 'center', cursor: 'pointer' }} onClick={() => setOpen((o) => !o)}>
         <div className="row" style={{ gap: 8, alignItems: 'center', minWidth: 0 }}>
-          <span className="mono" style={{ fontWeight: 700, width: 44 }}>{localTime(e.instant)}</span>
+          <span className="mono" style={{ fontWeight: 700, width: 44 }} title={e.approx ? 'Estimated date — the exact release date varies; connect the free FMP key and it auto-confirms' : undefined}>
+            {e.approx ? '~' : ''}{localTime(e.instant)}
+          </span>
           <span className="grade-dot" style={{ background: e.impact === 'high' ? 'var(--loss)' : 'var(--dom-news)' }} />
           <b>{e.short}</b>
+          {e.approx && <span className="chip" style={{ fontSize: 10, padding: '0 5px', color: 'var(--muted)' }}>est.</span>}
           <span className="muted small" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.name}</span>
         </div>
         <div className="row" style={{ gap: 3, flexShrink: 0 }}>
@@ -37,7 +41,7 @@ function Row({ e }: { e: CalendarEvent }) {
 }
 
 export function DayCatalysts({ date }: { date: string }) {
-  const events = eventsForDate(date);
+  const { events } = reconciledEventsForDate(date);
   const highCount = events.filter((e) => e.impact === 'high').length;
   return (
     <div className="card">
