@@ -5,8 +5,41 @@ import { DomainChip, Modal, useToast } from '../components/ui';
 import { DOMAINS, domainOf } from '../domain/taxonomy';
 import type { Strategy, StrategyStatus } from '../domain/types';
 import { db } from '../lib/db';
+import type { Trade } from '../domain/types';
 import { fmtMoney, fmtPct, fmtR } from '../lib/format';
-import { computeStats } from '../lib/stats';
+import { computeStats, equityCurve } from '../lib/stats';
+
+/** Evidence-based verdict on a strategy, from its own sample. */
+function verdict(st: ReturnType<typeof computeStats>): { label: string; color: string; note: string } {
+  if (st.count < 8) return { label: 'Building sample', color: 'var(--muted)', note: `${st.count}/8 trades to a first read` };
+  const pf = st.profitFactor;
+  if (st.expectancy > 0 && pf >= 1.3) return { label: 'Promote', color: 'var(--profit)', note: 'positive expectancy on a real sample' };
+  if (st.expectancy <= 0 && pf < 1) return { label: 'Retire / rework', color: 'var(--loss)', note: 'negative edge — stop risking size' };
+  return { label: 'Keep testing', color: 'var(--dom-news)', note: 'inconclusive — more reps needed' };
+}
+
+/** Small cumulative-P&L sparkline for one strategy's trades. */
+function Spark({ trades }: { trades: Trade[] }) {
+  const pts = equityCurve(trades);
+  if (pts.length < 2) return null;
+  const w = 200;
+  const h = 34;
+  const eqs = pts.map((p) => p.equity);
+  const min = Math.min(0, ...eqs);
+  const max = Math.max(0, ...eqs);
+  const range = max - min || 1;
+  const x = (i: number) => (i / (pts.length - 1)) * w;
+  const y = (e: number) => h - ((e - min) / range) * h;
+  const line = pts.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(p.equity).toFixed(1)}`).join(' ');
+  const up = eqs[eqs.length - 1] >= 0;
+  const zeroY = y(0);
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} style={{ width: '100%', height: 36, marginTop: 8 }} preserveAspectRatio="none">
+      <line x1="0" y1={zeroY} x2={w} y2={zeroY} stroke="var(--axis)" strokeWidth="0.75" strokeDasharray="3 3" />
+      <path d={line} fill="none" stroke={up ? 'var(--profit)' : 'var(--loss)'} strokeWidth="1.75" />
+    </svg>
+  );
+}
 
 const STATUS: { id: StrategyStatus; label: string; hint: string }[] = [
   { id: 'incubating', label: 'Incubating', hint: 'An observed pattern being written up — no live risk yet' },
@@ -97,7 +130,13 @@ export default function Strategies() {
                   return (
                     <div key={s.id} className="card" style={{ borderLeft: `3px solid ${d?.color ?? 'var(--hairline)'}` }}>
                       <div className="spread">
-                        <h3 style={{ fontSize: 15 }}>{s.name}</h3>
+                        <div className="row" style={{ gap: 8, alignItems: 'center', minWidth: 0 }}>
+                          <h3 style={{ fontSize: 15, margin: 0 }}>{s.name}</h3>
+                          {st && st.count > 0 && (() => {
+                            const v = verdict(st);
+                            return <span className="chip" title={v.note} style={{ background: v.color, color: '#141210', fontWeight: 700 }}>{v.label}</span>;
+                          })()}
+                        </div>
                         <div className="row" style={{ gap: 6 }}>
                           <button className="btn sm" onClick={() => setEditing({ ...s })}>
                             Edit
@@ -120,7 +159,9 @@ export default function Strategies() {
                           <Mini label="Expectancy" value={fmtMoney(st.expectancy, { sign: true })} cls={st.expectancy >= 0 ? 'pos' : 'neg'} />
                           <Mini label="Avg R" value={fmtR(st.avgR)} />
                         </div>
-                      ) : (
+                      ) : null}
+                      {st && st.count >= 2 && <Spark trades={trades.filter((t) => t.strategyId === s.id)} />}
+                      {(!st || st.count === 0) && (
                         <div className="muted small" style={{ marginTop: 10 }}>
                           No trades linked yet — link trades from the trade debrief page to build the sample.
                         </div>

@@ -2,6 +2,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { BucketBarChart, GradeRadar, RollingExpectancyChart } from '../components/charts';
+import { EdgeHeatmap } from '../components/EdgeHeatmap';
 import { DomainChip, EmptyState } from '../components/ui';
 import { DOMAINS, categoryLabel, domainOf } from '../domain/taxonomy';
 import { db } from '../lib/db';
@@ -172,6 +173,13 @@ export default function Analytics() {
               </table>
             </div>
           </div>
+        </div>
+
+        <div className="card">
+          <div className="card-title">
+            Edge timing map <span className="hint">expectancy ($/trade) by weekday × entry hour — trade your green windows</span>
+          </div>
+          <EdgeHeatmap trades={trades} />
         </div>
 
         <div className="grid grid-2">
