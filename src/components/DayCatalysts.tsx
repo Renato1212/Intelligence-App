@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { domainOf } from '../domain/taxonomy';
 import { localTime, type CalendarEvent } from '../lib/calendar';
-import { reconciledEventsForDate } from '../lib/reconcile';
+import { ensureLiveCoverage, reconciledEventsForDate } from '../lib/reconcile';
 
 /**
  * Free, always-on catalysts for the preparation day — no API key. Computed
@@ -41,6 +41,16 @@ function Row({ e }: { e: CalendarEvent }) {
 }
 
 export function DayCatalysts({ date }: { date: string }) {
+  // pull confirmed dates for estimated events if a market-data key is set
+  const [, setCoverageTick] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    void ensureLiveCoverage(date).then((ok) => alive && ok && setCoverageTick((t) => t + 1));
+    return () => {
+      alive = false;
+    };
+  }, [date]);
+
   const { events } = reconciledEventsForDate(date);
   const highCount = events.filter((e) => e.impact === 'high').length;
   return (

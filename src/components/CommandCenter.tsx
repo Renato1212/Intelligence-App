@@ -1,10 +1,10 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Trade } from '../domain/types';
 import { db } from '../lib/db';
 import { localTime } from '../lib/calendar';
-import { reconciledEventsForDate } from '../lib/reconcile';
+import { ensureLiveCoverage, reconciledEventsForDate } from '../lib/reconcile';
 import { buildFocus } from '../lib/confluence';
 import { cachedCot } from '../lib/cot';
 import { fmtMoney, todayISO, weekdayName } from '../lib/format';
@@ -39,7 +39,17 @@ export function CommandCenter({ trades }: { trades: Trade[] }) {
   const today = todayISO();
   const prep = useLiveQuery(() => db.preps.where('date').equals(today).first(), [today]);
 
-  const events = useMemo(() => reconciledEventsForDate(today).events, [today]);
+  const [coverageTick, setCoverageTick] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    void ensureLiveCoverage(today).then((ok) => alive && ok && setCoverageTick((t) => t + 1));
+    return () => {
+      alive = false;
+    };
+  }, [today]);
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const events = useMemo(() => reconciledEventsForDate(today).events, [today, coverageTick]);
   const highToday = events.filter((e) => e.impact === 'high');
   const nextEvent = useMemo(() => {
     const now = Date.now();

@@ -79,6 +79,23 @@ function allWeekdays(y: number, m: number, weekday: number): number[] {
   for (let d = 1; d <= daysInMonth(y, m); d++) if (dowUTC(y, m, d) === weekday) out.push(d);
   return out;
 }
+/** First occurrence of `weekday` on/after day-of-month `from`, or -1. */
+function weekdayOnOrAfter(y: number, m: number, from: number, weekday: number): number {
+  for (let d = from; d <= daysInMonth(y, m); d++) if (dowUTC(y, m, d) === weekday) return d;
+  return -1;
+}
+/** First business (Mon–Fri) day on/after day-of-month `from`, or -1. */
+function businessDayOnOrAfter(y: number, m: number, from: number): number {
+  for (let d = from; d <= daysInMonth(y, m); d++) {
+    const w = dowUTC(y, m, d);
+    if (w !== 0 && w !== 6) return d;
+  }
+  return -1;
+}
+/** Next business day strictly after day-of-month `d`, or -1. */
+function nextBusinessDay(y: number, m: number, d: number): number {
+  return businessDayOnOrAfter(y, m, d + 1);
+}
 
 /**
  * Is a given UTC date within US Eastern daylight time?
@@ -237,14 +254,16 @@ export function eventsForMonth(y: number, m: number): CalendarEvent[] {
   // approx: true and get reconciled to the confirmed date when a live
   // calendar source is connected (reconcile.ts).
 
-  // CPI ~ mid-month (BLS, usually Tue–Thu around the 10th–15th)
-  const cpiDay = nthWeekday(y, m, 3, 2); // 2nd Wednesday as anchor
+  // CPI ~ the Tue–Thu window around the 10th–15th; anchor = first Tuesday
+  // on/after the 10th (matches the BLS pattern within ~a day most months)
+  const cpiDay = weekdayOnOrAfter(y, m, 10, 2);
   if (cpiDay > 0) ev.push(make(T.cpi, y, m, cpiDay, 8, 30, 'monthly', true));
-  // PPI usually lands the day around CPI
-  if (cpiDay > 0 && cpiDay + 1 <= daysInMonth(y, m)) ev.push(make(T.ppi, y, m, cpiDay + 1, 8, 30, 'monthly', true));
+  // PPI usually lands the business day after CPI
+  const ppiDay = cpiDay > 0 ? nextBusinessDay(y, m, cpiDay) : -1;
+  if (ppiDay > 0) ev.push(make(T.ppi, y, m, ppiDay, 8, 30, 'monthly', true));
 
-  // Retail Sales ~ mid-month
-  const retailDay = nthWeekday(y, m, 2, 3);
+  // Retail Sales ~ mid-month (Census, usually the 15th–17th)
+  const retailDay = businessDayOnOrAfter(y, m, 15);
   if (retailDay > 0) ev.push(make(T.retail, y, m, retailDay, 8, 30, 'monthly', true));
 
   // JOLTS ~ turn of the month
