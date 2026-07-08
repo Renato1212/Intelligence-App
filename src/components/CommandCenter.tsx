@@ -3,7 +3,8 @@ import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Trade } from '../domain/types';
 import { db } from '../lib/db';
-import { eventsForDate, localTime } from '../lib/calendar';
+import { localTime } from '../lib/calendar';
+import { reconciledEventsForDate } from '../lib/reconcile';
 import { buildFocus } from '../lib/confluence';
 import { cachedCot } from '../lib/cot';
 import { fmtMoney, todayISO, weekdayName } from '../lib/format';
@@ -38,7 +39,7 @@ export function CommandCenter({ trades }: { trades: Trade[] }) {
   const today = todayISO();
   const prep = useLiveQuery(() => db.preps.where('date').equals(today).first(), [today]);
 
-  const events = useMemo(() => eventsForDate(today), [today]);
+  const events = useMemo(() => reconciledEventsForDate(today).events, [today]);
   const highToday = events.filter((e) => e.impact === 'high');
   const nextEvent = useMemo(() => {
     const now = Date.now();
@@ -84,7 +85,7 @@ export function CommandCenter({ trades }: { trades: Trade[] }) {
                 {highToday.length ? `${highToday.length} high-impact` : `${events.length} scheduled`}
               </b>
               <div className="muted small">
-                {nextEvent ? <>next <b style={{ color: 'var(--text)' }}>{nextEvent.short}</b> at {localTime(nextEvent.instant)}</> : 'all released for today'}
+                {nextEvent ? <>next <b style={{ color: 'var(--text)' }}>{nextEvent.approx ? '~' : ''}{nextEvent.short}</b> at {localTime(nextEvent.instant)}{nextEvent.approx ? ' (est.)' : ''}</> : 'all released for today'}
               </div>
             </div>
           )}

@@ -26,6 +26,8 @@ export interface IndicatorSpec {
   /** unit of the TRANSFORMED value, e.g. 'k jobs', '% m/m', '%' */
   unit: string;
   transform: Transform;
+  /** multiplier applied AFTER the transform (e.g. thousands → millions) */
+  scale?: number;
   decimals: number;
   /** tried in order until one returns data */
   sources: { provider: string; dataset: string; series: string }[];
@@ -66,7 +68,8 @@ export const INDICATORS: IndicatorSpec[] = [
     ],
   },
   {
-    id: 'jolts-openings', eventShort: 'JOLTS', label: 'Job openings', unit: 'M', transform: 'level', decimals: 2,
+    // BLS reports openings in thousands; displayed in millions
+    id: 'jolts-openings', eventShort: 'JOLTS', label: 'Job openings', unit: 'M', transform: 'level', scale: 0.001, decimals: 2,
     sources: [
       { provider: 'BLS', dataset: 'jt', series: 'JTS000000000000000JOL' },
       { provider: 'BLS', dataset: 'JT', series: 'JTS000000000000000JOL' },
@@ -244,7 +247,7 @@ export function indicatorInsight(spec: IndicatorSpec, stats: PrintStats): string
 /* ------------------------------- fetching ------------------------------- */
 
 const API = 'https://api.db.nomics.world/v22/series';
-const CACHE_KEY = 'ei-econ-cache-v1';
+const CACHE_KEY = 'ei-econ-cache-v2'; // v2: JOLTS scaled to millions
 const FRESH_MS = 20 * 3600 * 1000;
 
 interface CacheShape {
@@ -302,7 +305,8 @@ async function fetchIndicator(spec: IndicatorSpec): Promise<PrintPoint[]> {
     if (raw.length >= 8) {
       // keep ~9 years raw so 8y of transformed history survives a YoY transform
       const trimmed = raw.slice(Math.max(0, raw.length - 108));
-      const points = applyTransform(trimmed, spec.transform);
+      let points = applyTransform(trimmed, spec.transform);
+      if (spec.scale != null) points = points.map((p) => ({ period: p.period, value: p.value * spec.scale! }));
       if (points.length >= 4) return points;
     }
     lastErr = `Series ${src.provider}/${src.series} returned too little data.`;
