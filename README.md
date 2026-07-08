@@ -120,6 +120,30 @@ read paid COT services sell:
   positioning table + confluence list, so your AI analyst sees the market context alongside your
   trades.
 
+### Macro Map — the context layer for all five edge domains (free, keyless)
+One page that answers "what regime am I trading in?" before the open:
+
+- **Narrative monitor** *(News/Geo-Macro)* — global news attention per market theme (Fed, tariffs,
+  war, OPEC, banking stress, inflation) from the GDELT project, keyless, updating ~every 15
+  minutes. Each theme shows its 2-week attention curve, a **SURGE flag when coverage spikes vs its
+  own baseline**, the markets it hits, and one click pulls the live headlines driving the spike.
+- **Rates & the policy cycle** *(Central Banks)* — daily Treasury yields from the Fed's own H.15
+  via DBnomics: the 2s10s spread history with inversion shading (the cycle clock), today's curve
+  overlaid on 1 month and 1 year ago, inversion streak, and a countdown to the next FOMC — plus a
+  computed one-line policy read.
+- **Cross-asset map** *(Technicals)* — the AXIA preparation question "same movement across
+  markets, or one alone?" computed: a 20-day correlation heatmap across equities, bonds, dollar,
+  gold, crude and euro, **correlation-break detection** (pairs that left their 60-day norm — gold
+  outlined), and each market's trend + volatility-percentile state.
+- **The flow calendar** *(Flow Events)* — OPEX, quad witching, futures roll, VIX expiry,
+  month/quarter-end rebalancing, auction weeks and new-month inflows, computed from exchange rules
+  with zero API — merged into the same calendar as the economic events, so flow days appear in the
+  week-ahead, the session radar, day preparation and your own event-day stats, each with its
+  mechanics and playbook attached.
+- **The learning layer** — every panel carries a collapsible **Principle** written in the
+  framework's language, so the platform teaches the meaning and application of each domain every
+  time it's used.
+
 ### Release intelligence — the data behind every catalyst (free, keyless)
 The Catalysts section doesn't just list NFP and CPI — it shows what each release has actually been
 **printing**, pulled keylessly from DBnomics (the official BLS/ISM data, CORS-open, no account):

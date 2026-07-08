@@ -17,6 +17,8 @@
  * so they live in a small table; everything else is rule-derived.
  */
 
+import { flowEventsForMonth } from './flowCalendar';
+
 export type EventImpact = 'high' | 'medium';
 export type EdgeDomain = 'central-banks' | 'economic-data' | 'news' | 'technicals' | 'flow';
 
@@ -251,6 +253,9 @@ export function eventsForMonth(y: number, m: number): CalendarEvent[] {
       ev.push(make(T.fomcMins, y, m, minutes.getUTCDate(), 14, 0, 'scheduled'));
     }
   }
+
+  // the FLOW domain: expirations, rolls, rebalancing, auctions (computed too)
+  ev.push(...flowEventsForMonth(y, m));
 
   return ev.sort((a, b) => a.instant.localeCompare(b.instant));
 }
