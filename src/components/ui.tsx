@@ -93,6 +93,27 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
 export const useToast = () => useContext(ToastCtx);
 
+/**
+ * The learning layer: every data section can carry its market principle, so
+ * using the platform trains the framework. Collapsed by default — one click
+ * away, never in the way.
+ */
+export function Principle({ domain, children }: { domain: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--hairline)' }}>
+      <span
+        className="small"
+        style={{ cursor: 'pointer', color: 'var(--gold)', fontWeight: 600, userSelect: 'none' }}
+        onClick={() => setOpen((o) => !o)}
+      >
+        {open ? '▾' : '▸'} Principle — {domain}
+      </span>
+      {open && <div className="small muted" style={{ marginTop: 8, lineHeight: 1.55 }}>{children}</div>}
+    </div>
+  );
+}
+
 export function EmptyState({ title, children }: { title: string; children?: ReactNode }) {
   return (
     <div className="card empty">

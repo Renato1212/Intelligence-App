@@ -268,16 +268,17 @@ function writeCache(cache: CacheShape): void {
 }
 
 /** Parse a DBnomics v22 single-series response into raw ascending points. */
-export function parseDbnomics(json: unknown): PrintPoint[] {
+export function parseDbnomics(json: unknown, granularity: 'month' | 'day' = 'month'): PrintPoint[] {
   const docs = (json as { series?: { docs?: { period?: unknown[]; value?: unknown[] }[] } })?.series?.docs;
   const doc = Array.isArray(docs) ? docs[0] : null;
   if (!doc || !Array.isArray(doc.period) || !Array.isArray(doc.value)) return [];
+  const keep = granularity === 'day' ? 10 : 7;
   const out: PrintPoint[] = [];
   for (let i = 0; i < doc.period.length; i++) {
     const v = Number(doc.value[i]);
     const p = String(doc.period[i] ?? '');
     if (!isFinite(v) || !/^\d{4}-\d{2}/.test(p)) continue;
-    out.push({ period: p.slice(0, 7), value: v });
+    out.push({ period: p.slice(0, keep), value: v });
   }
   return out.sort((a, b) => a.period.localeCompare(b.period));
 }
