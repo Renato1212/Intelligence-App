@@ -17,7 +17,7 @@
  * honest estimate beats silently wrong data.
  */
 import { etInstant, eventsForDate, type CalendarEvent } from './calendar';
-import { cachedRowsCovering, hasLiveMatcher, rowsMatching, type LiveEventRow } from './market';
+import { cachedRowsCovering, fetchUSCalendarRange, getMarketApiKey, hasLiveMatcher, rowsMatching, type LiveEventRow } from './market';
 
 function addDaysISO(iso: string, days: number): string {
   const d = new Date(iso + 'T00:00:00Z');
@@ -99,4 +99,22 @@ export function reconciledUpcoming(startISO: string, days: number): CalendarEven
   const out: CalendarEvent[] = [];
   for (let i = 0; i <= days; i++) out.push(...reconciledEventsForDate(addDaysISO(startISO, i)).events);
   return out.sort((a, b) => a.instant.localeCompare(b.instant));
+}
+
+/* Fetch coverage from ANY consumer (prep, command center) — reconciliation
+ * must not depend on the trader visiting the Catalysts page first. Attempts
+ * are throttled so multiple components mounting together fetch once. */
+let lastCoverageTry = 0;
+
+/**
+ * Ensure cached provider rows cover `dateISO` (3-week window), fetching them
+ * if a market-data key is connected. Resolves true when coverage exists.
+ */
+export async function ensureLiveCoverage(dateISO: string): Promise<boolean> {
+  if (cachedRowsCovering(dateISO).covered) return true;
+  if (!getMarketApiKey()) return false;
+  if (Date.now() - lastCoverageTry < 60000) return false;
+  lastCoverageTry = Date.now();
+  const res = await fetchUSCalendarRange(addDaysISO(dateISO, -7), addDaysISO(dateISO, 14));
+  return res.rows.length >= 8;
 }
