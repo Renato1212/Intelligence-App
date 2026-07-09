@@ -11,10 +11,18 @@
 
 const CAP_WS = 20000;
 const CAP_REQ = 500;
+const CAP_WSBIN = 4000;
+const CAP_SHAPES = 200;
 const STORE_KEY = 'ei-capture-buffer';
 
-let buf = { ws: [], requests: [], fills: [], startedAt: new Date().toISOString() };
+function emptyBuf() {
+  return { ws: [], wsout: [], wsbin: [], requests: [], fills: [], shapes: [], workers: [], wsOpens: [], startedAt: new Date().toISOString() };
+}
+let buf = emptyBuf();
 let wsSeen = new Set();
+let wsbinSeen = new Set();
+let shapeSeen = new Set();
+let workerSeen = new Set();
 let reqByUrl = new Map();
 let fillSeen = new Set();
 let saveTimer = null;
@@ -23,8 +31,11 @@ let saveTimer = null;
 chrome.storage.local.get(STORE_KEY).then((r) => {
   const s = r && r[STORE_KEY];
   if (s && Array.isArray(s.ws)) {
-    buf = s;
+    buf = Object.assign(emptyBuf(), s);
     for (const f of s.ws) wsSeen.add(sigWs(f));
+    for (const b of s.wsbin || []) wsbinSeen.add((b.len || 0) + '|' + (b.b64 || '').slice(0, 32));
+    for (const sh of s.shapes || []) shapeSeen.add(sh.kind + '|' + sh.binary + '|' + (sh.sample || '').slice(0, 40));
+    for (const w of s.workers || []) workerSeen.add(w.url);
     for (const r2 of s.requests || []) reqByUrl.set(r2.url, r2);
     for (const fl of s.fills || []) fillSeen.add(fillKey(fl));
   }
@@ -173,19 +184,45 @@ function addWs(item) {
   if (buf.ws.length < CAP_WS) buf.ws.push(item);
   ingestFills(item.body);
 }
+function addWsBin(item) {
+  const sig = (item.len || 0) + '|' + (item.b64 || '').slice(0, 32);
+  if (wsbinSeen.has(sig)) return;
+  wsbinSeen.add(sig);
+  if (buf.wsbin.length < CAP_WSBIN) buf.wsbin.push(item);
+}
 function addReq(item) {
   if (!item.url) item.url = 'req';
   reqByUrl.set(item.url, item); // keep latest per URL
   buf.requests = Array.from(reqByUrl.values()).slice(-CAP_REQ);
   ingestFills(item.body);
 }
+function addShape(item) {
+  const sig = item.kind + '|' + item.binary + '|' + (item.sample || '').slice(0, 40);
+  if (shapeSeen.has(sig)) return;
+  shapeSeen.add(sig);
+  if (buf.shapes.length < CAP_SHAPES) buf.shapes.push(item);
+}
+function addWorker(item) {
+  if (!item.url || workerSeen.has(item.url)) return;
+  workerSeen.add(item.url);
+  buf.workers.push(item);
+}
+function addWsOpen(item) {
+  if (buf.wsOpens.length < 200 && item.url) buf.wsOpens.push({ url: item.url, at: new Date().toISOString() });
+}
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (!msg || !msg.type) return;
   if (msg.type === 'ei/frame') {
     try {
-      if (msg.kind === 'ws' && msg.payload) addWs(msg.payload);
-      else if (msg.kind === 'req' && msg.payload) addReq(msg.payload);
+      const p = msg.payload;
+      if (msg.kind === 'ws' && p) addWs(p);
+      else if (msg.kind === 'wsout' && p) { if (buf.wsout.length < 2000) buf.wsout.push(p); }
+      else if (msg.kind === 'wsbin' && p) addWsBin(p);
+      else if (msg.kind === 'req' && p) addReq(p);
+      else if (msg.kind === 'shape' && p) addShape(p);
+      else if (msg.kind === 'worker' && p) addWorker(p);
+      else if (msg.kind === 'wsopen' && p) addWsOpen(p);
       persist();
     } catch (e) {}
     return; // no response needed
@@ -193,37 +230,56 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'ei/stats') {
     sendResponse({
       ws: buf.ws.length,
+      wsbin: buf.wsbin.length,
       requests: buf.requests.length,
       fills: buf.fills.length,
+      workers: buf.workers.length,
+      wsOpens: buf.wsOpens.length,
+      shapes: buf.shapes.length,
       recent: buf.fills.slice(-6),
       startedAt: buf.startedAt,
     });
     return true;
   }
-  if (msg.type === 'ei/dump') {
+  if (msg.type === 'ei/dump' || msg.type === 'ei/diag') {
+    const diag = msg.type === 'ei/diag';
     const payload = {
       source: 'edge-capture',
-      version: 8,
+      version: 9,
       url: 'https://trader.axiafutures.com/index.html',
       title: 'TraderOne (Edge Capture extension)',
       capturedAt: new Date().toISOString(),
       tables: [],
       requests: buf.requests,
       ws: buf.ws,
+      // binary frames + outgoing sends only in the full diagnostic export
+      wsbin: diag ? buf.wsbin : [],
+      wsout: diag ? buf.wsout : [],
       diagnostics: {
         extension: true,
         jsonResponses: buf.requests.length,
         wsFrames: buf.ws.length,
+        wsBinaryFrames: buf.wsbin.length,
+        wsConnections: buf.wsOpens.length,
+        workers: buf.workers,
         fillsDetected: buf.fills.length,
+        frameShapes: diag ? buf.shapes : buf.shapes.slice(0, 20),
         startedAt: buf.startedAt,
+        note:
+          buf.ws.length === 0 && buf.wsbin.length === 0 && buf.requests.length === 0
+            ? (buf.workers.length
+                ? 'No page-level socket/API traffic seen, but ' + buf.workers.length + ' worker(s) were created — the fills feed likely runs inside a Web Worker. Send this diagnostic file to support.'
+                : 'No network traffic captured yet. Make sure Edge Capture was enabled BEFORE the page loaded, then place or view a trade.')
+            : 'ok',
       },
     };
     sendResponse({ payload, fills: buf.fills });
     return true;
   }
   if (msg.type === 'ei/clear') {
-    buf = { ws: [], requests: [], fills: [], startedAt: new Date().toISOString() };
-    wsSeen = new Set(); reqByUrl = new Map(); fillSeen = new Set();
+    buf = emptyBuf();
+    wsSeen = new Set(); wsbinSeen = new Set(); shapeSeen = new Set();
+    workerSeen = new Set(); reqByUrl = new Map(); fillSeen = new Set();
     chrome.storage.local.set({ [STORE_KEY]: buf }).catch(() => {});
     sendResponse({ ok: true });
     return true;

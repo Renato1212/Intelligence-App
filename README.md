@@ -73,9 +73,12 @@ profile is charted as a radar in Edge Analytics, so you can see which skill is l
   descriptions, per-fill execution detail and photos included. Existing trades are enriched, never
   duplicated. If a platform's layout isn't recognised, the app shows the raw headers/field names it
   found so support can be added precisely. Nothing leaves your browser during capture.
-- **Execution ladder** — for trades with fill-level detail, the trade page shows every fill labelled
-  Entry / Scale-in / Scale-out / Exit, with the running position size and the evolving average price
-  of the open position — built for studying your scaling decisions, not just the averaged result.
+- **Execution logger** — every trade has an editable fills ladder: add each decision (entry, every
+  scale-in and add, each partial, the exit) with its own order type (market / limit / stop), price,
+  size and time, and the role, running position, evolving average price and realized P&L are
+  computed live. Saving recomputes the trade's entry/exit/size/P&L from the fills, so a hand-logged
+  trade is a first-class one. Fills captured from Trader One land in the same logger and can be
+  corrected by hand — so tracking every decision never depends on scraping working.
 - **Study filters** — combine domain, instrument, date and multi-tag filters (setups, phases,
   data events like NFP / CPI / ISM…) across trades, and filter journal days by the tags of the
   trades inside them.
