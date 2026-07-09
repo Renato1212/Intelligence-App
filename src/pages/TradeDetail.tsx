@@ -7,6 +7,7 @@ import { CRITERIA, DOMAINS, domainOf, GRADE_LEVELS } from '../domain/taxonomy';
 import type { CriterionId, Execution, GradeLevel, Trade } from '../domain/types';
 import { db } from '../lib/db';
 import { downloadFile, openPrintView, tradeDebriefHtml, tradeDebriefMarkdown } from '../lib/exporters';
+import { applyFillsToTrade, computeLadder, ORDER_TYPES, sortFills } from '../lib/fills';
 import { fmtDate, fmtDuration, fmtMoney, fmtR, fmtTime } from '../lib/format';
 import { rMultiple } from '../lib/stats';
 
@@ -266,20 +267,15 @@ export default function TradeDetail() {
           </div>
         </div>
 
-        {(draft.executions?.length ?? 0) > 0 ? (
-          <ExecutionLadder trade={draft} />
-        ) : (
-          <div className="card">
-            <div className="card-title">Executions — how the position was built</div>
-            <p className="muted small" style={{ margin: 0 }}>
-              No per-fill detail was captured for this trade — only the averaged entry (
-              {Number(draft.entryPrice.toFixed(6))}) and exit ({Number(draft.exitPrice.toFixed(6))}). To see every
-              scale-in/scale-out with its exact size, price, time and order type, re-run Edge Capture on Trader One
-              with the <b>Order History / executions view open</b> and re-import — the fills will be matched to this
-              trade automatically.
-            </p>
-          </div>
-        )}
+        <ExecutionLogger
+          trade={draft}
+          onApply={async (execs) => {
+            const next = applyFillsToTrade(draft, execs);
+            setDraft(next);
+            await db.trades.put(next);
+            toast(execs.length ? `Saved ${execs.length} fills — trade recomputed` : 'Fills cleared');
+          }}
+        />
 
         <div className="card">
           <div className="card-title">
@@ -342,108 +338,179 @@ export default function TradeDetail() {
   );
 }
 
-const ORDER_TYPE_LABEL: Record<string, string> = {
-  market: 'Market',
-  limit: 'Limit',
-  stop: 'Stop',
-  'stop-limit': 'Stop-limit',
-  unknown: '—',
-};
+/** Local-time value for a datetime-local input from an ISO instant. */
+function toLocalInput(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function fromLocalInput(v: string): string {
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+}
 
 /**
- * Every fill of the trade with its role in the position (entry, scale-in,
- * scale-out, exit), the running position size and the evolving average
- * price of the open position — the raw material for studying in-trade
- * decisions when scaling dynamically.
+ * The Execution Logger — track every decision in a trade by hand or from
+ * capture. Add each fill (scale-in, add, partial, exit) with its own order
+ * type, price, size and time; the role, running position, evolving average
+ * price and realized P&L are computed live, and applying the fills recomputes
+ * the trade's entry/exit/size/P&L so a hand-logged trade is a first-class one.
  */
-function ExecutionLadder({ trade }: { trade: Trade }) {
-  const execs = [...(trade.executions ?? [])].sort((a, b) => a.time.localeCompare(b.time));
-  const dir = trade.side === 'LONG' ? 1 : -1;
+function ExecutionLogger({ trade, onApply }: { trade: Trade; onApply: (execs: Execution[]) => void }) {
+  const [fills, setFills] = useState<Execution[]>(() => sortFills(trade.executions ?? []));
+  const [dirty, setDirty] = useState(false);
 
-  let position = 0; // signed contracts (+ long / − short)
-  let avgPrice = 0; // average price of the open position
-  const rows = execs.map((e, i) => {
-    const delta = (e.action === 'BUY' ? 1 : -1) * e.qty;
-    const before = position;
-    const increasing = Math.sign(delta) === dir || before === 0;
-    if (increasing) {
-      // adding in the trade direction — average price blends
-      avgPrice = (Math.abs(before) * avgPrice + e.qty * e.price) / (Math.abs(before) + e.qty);
-    }
-    position += delta;
-    const kind =
-      increasing && before === 0
-        ? 'Entry'
-        : increasing
-          ? 'Scale-in'
-          : position === 0 && i === execs.length - 1
-            ? 'Exit'
-            : position === 0
-              ? 'Exit'
-              : 'Scale-out';
-    return { e, kind, position, avgPrice };
-  });
+  // reload when the trade identity changes (navigating between trades)
+  useEffect(() => {
+    setFills(sortFills(trade.executions ?? []));
+    setDirty(false);
+  }, [trade.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const maxSize = Math.max(...rows.map((r) => Math.abs(r.position)), 0);
-  const entries = execs.filter((e) => (e.action === 'BUY' ? 1 : -1) === dir);
-  const exits = execs.filter((e) => (e.action === 'BUY' ? 1 : -1) !== dir);
-  const wavg = (xs: Execution[]) => {
-    const q = xs.reduce((s, x) => s + x.qty, 0);
-    return q ? xs.reduce((s, x) => s + x.price * x.qty, 0) / q : 0;
-  };
+  const dirLabel = trade.side === 'LONG' ? 'BUY' : 'SELL';
+  const rows = computeLadder(fills, trade.side);
   const fmtPx = (v: number) => Number(v.toFixed(6)).toString();
+
+  const patch = (i: number, p: Partial<Execution>) => {
+    setFills((fs) => fs.map((f, j) => (j === i ? { ...f, ...p } : f)));
+    setDirty(true);
+  };
+  const removeRow = (i: number) => {
+    setFills((fs) => fs.filter((_, j) => j !== i));
+    setDirty(true);
+  };
+  const addRow = () => {
+    // default: continue in the trade direction, market order, at the last
+    // known price, timed just after the previous fill
+    const last = fills[fills.length - 1];
+    const nextTime = last ? new Date(new Date(last.time).getTime() + 60000).toISOString() : trade.entryTime || new Date().toISOString();
+    const seed: Execution = {
+      time: nextTime,
+      action: (trade.side === 'LONG' ? 'BUY' : 'SELL') as Execution['action'],
+      qty: last?.qty ?? trade.qty ?? 1,
+      price: last?.price ?? trade.entryPrice ?? 0,
+      orderType: 'market',
+    };
+    setFills((fs) => [...fs, seed]);
+    setDirty(true);
+  };
+  const seedFromSummary = () => {
+    // bootstrap two fills from the averaged trade so the trader can refine
+    const entry: Execution = { time: trade.entryTime, action: dirLabel as Execution['action'], qty: trade.qty || 1, price: trade.entryPrice, orderType: 'market' };
+    const exit: Execution = { time: trade.exitTime, action: (dirLabel === 'BUY' ? 'SELL' : 'BUY') as Execution['action'], qty: trade.qty || 1, price: trade.exitPrice, orderType: 'market' };
+    setFills([entry, exit]);
+    setDirty(true);
+  };
+
+  const maxSize = Math.max(...rows.map((r) => r.position), 0);
 
   return (
     <div className="card">
-      <div className="card-title">
-        Executions — how the position was built{' '}
-        <span className="hint">
-          {execs.length} fills · max size {maxSize} · avg in {fmtPx(wavg(entries))} · avg out {fmtPx(wavg(exits))}
-        </span>
+      <div className="spread" style={{ alignItems: 'baseline', flexWrap: 'wrap', gap: 8 }}>
+        <div className="card-title" style={{ marginBottom: 0 }}>
+          Execution logger{' '}
+          <span className="hint">
+            {fills.length ? `${fills.length} fills · max size ${maxSize}` : 'log every add, partial & exit — with its order type'}
+          </span>
+        </div>
+        <div className="row" style={{ gap: 6 }}>
+          <button className="btn sm" onClick={addRow}>+ Add fill</button>
+          {fills.length === 0 && (trade.entryPrice || trade.exitPrice) ? (
+            <button className="btn sm" title="Start from the averaged entry/exit, then refine each fill" onClick={seedFromSummary}>
+              Seed from trade
+            </button>
+          ) : null}
+          {dirty && (
+            <button className="btn primary sm" onClick={() => { onApply(fills); setDirty(false); }}>
+              Save fills to trade
+            </button>
+          )}
+        </div>
       </div>
-      <div className="table-wrap">
-        <table className="data">
-          <thead>
-            <tr>
-              <th>Time</th>
-              <th>Role</th>
-              <th>Action</th>
-              <th>Order type</th>
-              <th className="num">Qty</th>
-              <th className="num">Price</th>
-              <th className="num">Position after</th>
-              <th className="num">Avg price</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r, i) => (
-              <tr key={i}>
-                <td className="mono">{fmtTime(r.e.time)}</td>
-                <td>
-                  <span
-                    className="chip"
-                    style={
-                      r.kind === 'Entry' || r.kind === 'Scale-in'
-                        ? { color: 'var(--gold-strong)', borderColor: 'var(--gold)' }
-                        : undefined
-                    }
-                  >
-                    {r.kind}
-                  </span>
-                </td>
-                <td>
-                  <span className={`side-badge ${r.e.action === 'BUY' ? 'long' : 'short'}`}>{r.e.action}</span>
-                </td>
-                <td className="muted">{ORDER_TYPE_LABEL[r.e.orderType] ?? r.e.orderType}</td>
-                <td className="num">{r.e.qty}</td>
-                <td className="num mono">{fmtPx(r.e.price)}</td>
-                <td className="num">{Math.abs(r.position)}</td>
-                <td className="num mono">{Math.abs(r.position) > 0 ? fmtPx(r.avgPrice) : '—'}</td>
+
+      {fills.length === 0 ? (
+        <p className="muted small" style={{ margin: '10px 0 0' }}>
+          No per-fill detail yet. Click <b>+ Add fill</b> to log each decision — entry, every scale-in and add, each
+          partial and the exit — with its order type (market / limit / stop), price, size and time. The role, running
+          position, average price and realized P&L are computed as you go, and saving recomputes the trade from your
+          fills. Fills captured from Trader One land here too and can be corrected by hand.
+        </p>
+      ) : (
+        <div className="table-wrap" style={{ marginTop: 10 }}>
+          <table className="data">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Role</th>
+                <th>Action</th>
+                <th>Order type</th>
+                <th className="num">Qty</th>
+                <th className="num">Price</th>
+                <th className="num">Size after</th>
+                <th className="num">Avg price</th>
+                <th className="num">Realized</th>
+                <th />
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => {
+                // the index into `fills` for this sorted row
+                const idx = fills.indexOf(r.e);
+                return (
+                  <tr key={i}>
+                    <td>
+                      <input
+                        type="datetime-local"
+                        value={toLocalInput(r.e.time)}
+                        onChange={(e) => patch(idx, { time: fromLocalInput(e.target.value) })}
+                        style={{ width: 172, fontSize: 12 }}
+                      />
+                    </td>
+                    <td>
+                      <span className="chip" style={r.role === 'Entry' || r.role === 'Scale-in' ? { color: 'var(--gold-strong)', borderColor: 'var(--gold)' } : undefined}>
+                        {r.role}
+                      </span>
+                    </td>
+                    <td>
+                      <select value={r.e.action} onChange={(e) => patch(idx, { action: e.target.value as Execution['action'] })} style={{ fontSize: 12 }}>
+                        <option value="BUY">BUY</option>
+                        <option value="SELL">SELL</option>
+                      </select>
+                    </td>
+                    <td>
+                      <select value={r.e.orderType} onChange={(e) => patch(idx, { orderType: e.target.value as Execution['orderType'] })} style={{ fontSize: 12 }}>
+                        {ORDER_TYPES.map((o) => (
+                          <option key={o.id} value={o.id}>{o.label}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="num">
+                      <input type="number" min="0" step="any" value={r.e.qty} onChange={(e) => patch(idx, { qty: Number(e.target.value) })} style={{ width: 62, textAlign: 'right' }} />
+                    </td>
+                    <td className="num">
+                      <input type="number" step="any" value={r.e.price} onChange={(e) => patch(idx, { price: Number(e.target.value) })} style={{ width: 92, textAlign: 'right' }} className="mono" />
+                    </td>
+                    <td className="num">{r.position}</td>
+                    <td className="num mono">{r.position > 0 ? fmtPx(r.avgPrice) : '—'}</td>
+                    <td className={`num mono ${r.realizedPts > 0 ? 'pos' : r.realizedPts < 0 ? 'neg' : 'muted'}`}>
+                      {r.realizedPts ? `${r.realizedPts > 0 ? '+' : ''}${fmtPx(r.realizedPts)}` : '—'}
+                    </td>
+                    <td>
+                      <span style={{ cursor: 'pointer', color: 'var(--muted)' }} title="Remove fill" onClick={() => removeRow(idx)}>✕</span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {dirty && (
+        <div className="small" style={{ marginTop: 8, color: 'var(--gold)' }}>
+          Unsaved fill edits — <b>Save fills to trade</b> to recompute entry, exit, size and P&amp;L from these fills.
+        </div>
+      )}
     </div>
   );
 }
