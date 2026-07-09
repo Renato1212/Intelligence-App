@@ -1,0 +1,46 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  :root { color-scheme: dark; }
+  body { width: 300px; margin: 0; font: 13px/1.45 system-ui, -apple-system, Segoe UI, sans-serif; background: #141210; color: #f5f0e6; }
+  header { display: flex; align-items: center; gap: 8px; padding: 12px 14px; background: linear-gradient(90deg, #c9a227, #e6c34d); color: #141210; font-weight: 800; }
+  .body { padding: 14px; }
+  .count { font-size: 30px; font-weight: 800; color: #e6c34d; line-height: 1; }
+  .sub { opacity: .7; font-size: 12px; margin: 3px 0 12px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; font-size: 12px; margin-bottom: 12px; }
+  .grid b { color: #f5f0e6; }
+  .row { display: flex; gap: 6px; margin-bottom: 6px; }
+  button { flex: 1; border: 0; border-radius: 7px; padding: 9px; font-weight: 700; cursor: pointer; font-size: 12px; }
+  .primary { background: #c9a227; color: #141210; }
+  .ghost { background: #2a2622; color: #f5f0e6; border: 1px solid #3a352e; }
+  .hint { opacity: .65; font-size: 11px; margin-top: 8px; }
+  .warn { color: #e6c34d; }
+  a.link { color: #e6c34d; }
+</style>
+</head>
+<body>
+  <header><span>⏺ Edge Capture</span></header>
+  <div class="body">
+    <div class="count" id="count">0 fills</div>
+    <div class="sub" id="sub">Recording while you trade.</div>
+    <div class="grid">
+      <span>WS text</span><b id="ws">0</b>
+      <span>WS binary</span><b id="wsbin">0</b>
+      <span>API responses</span><b id="req">0</b>
+      <span>Workers</span><b id="workers">0</b>
+    </div>
+    <div class="row">
+      <button class="primary" id="export">Export fills</button>
+    </div>
+    <div class="row">
+      <button class="ghost" id="diag">Download diagnostic</button>
+      <button class="ghost" id="clear" style="flex:0 0 74px">Clear</button>
+    </div>
+    <div class="hint" id="status"></div>
+    <div class="hint">Open on <a class="link" href="https://trader.axiafutures.com/" target="_blank">Trader One</a>, keep this enabled, place/view trades, then <b>Export</b> and import into Edge Intelligence. If no fills appear, <b>Download diagnostic</b> and send it to support.</div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

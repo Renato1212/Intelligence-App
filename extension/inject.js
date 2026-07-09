@@ -1,16 +1,26 @@
 /*
  * Edge Capture — MAIN-world hook.
  *
- * This runs at document_start in the page's REAL JavaScript context (world:
- * "MAIN"), in every frame, BEFORE Trader One's own code executes. That is the
- * whole reason this is an extension and not a bookmarklet: we replace
- * window.WebSocket / fetch / XMLHttpRequest before the app ever constructs
- * them, so the socket that streams your fills is captured from its very first
- * frame — including binary frames, which trading platforms commonly use.
+ * Runs at document_start in the page's REAL JavaScript context (world:
+ * "MAIN"), in every frame, BEFORE Trader One's own code executes — so the
+ * socket that streams your fills is captured from its very first frame.
  *
- * We do no parsing here. Each relevant frame/response is forwarded (via
- * window.postMessage) to the isolated-world content script, which relays it to
- * the background service worker. Nothing is sent anywhere off your machine.
+ * This build is deliberately NON-INVASIVE: it observes network traffic and
+ * forwards copies to the extension. It never alters the data the platform
+ * sends or receives, never rewrites Worker scripts, and swallows all its own
+ * errors — so it cannot break Trader One while you are trading.
+ *
+ * What it captures:
+ *   - WebSocket messages, TEXT and BINARY. Binary frames (protobuf/msgpack,
+ *     which trading platforms commonly use for fills) are kept as base64 so
+ *     the exact format is never lost, even when it is not JSON.
+ *   - WebSocket sends (outgoing order submissions carry the order type).
+ *   - fetch / XMLHttpRequest JSON responses (the Order History / executions
+ *     endpoint the journal UI loads).
+ *   - A safe census of Worker / SharedWorker script URLs — WITHOUT modifying
+ *     them — so the diagnostic can reveal when the fills socket lives inside a
+ *     worker this page-level hook cannot see.
+ *   - A small sample of every DISTINCT frame shape, for the diagnostic export.
  */
 (function () {
   'use strict';
@@ -18,9 +28,7 @@
   window.__eiInjected = true;
 
   function post(kind, payload) {
-    try {
-      window.postMessage({ __eiCapture: true, kind: kind, payload: payload }, '*');
-    } catch (e) {}
+    try { window.postMessage({ __eiCapture: true, kind: kind, payload: payload }, '*'); } catch (e) {}
   }
   function looksJson(s) {
     if (!s || typeof s !== 'string') return false;
@@ -28,36 +36,76 @@
     var c = t.charAt(0);
     return c === '{' || c === '[';
   }
-  // Fill / order frames always kept, even amid high-volume market data.
   var FILLKW = /fill|exec|filled|"?side"?|avgprice|avg_price|"?qty"?|"?price"?|position|leg|order|trade/i;
 
-  function relayWsText(url, t) {
+  // base64 of a byte array, chunked to avoid call-stack limits
+  function bytesToB64(bytes) {
+    try {
+      var CH = 0x8000, out = '';
+      for (var i = 0; i < bytes.length; i += CH) out += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+      return btoa(out);
+    } catch (e) { return ''; }
+  }
+
+  var shapeSeen = Object.create(null), shapeCount = 0;
+  function recordShape(kind, sample, binary) {
+    try {
+      var key = kind + '|' + (binary ? 'bin' : 'txt') + '|' + sample.slice(0, 40);
+      if (shapeSeen[key]) return;
+      if (shapeCount > 120) return;
+      shapeSeen[key] = 1; shapeCount++;
+      post('shape', { kind: kind, binary: !!binary, sample: sample.slice(0, 300) });
+    } catch (e) {}
+  }
+
+  function relayWsText(url, t, dir) {
     if (typeof t !== 'string' || !t) return;
+    recordShape('ws-' + (dir || 'in'), t, false);
     if (t.length > 1500000) return;
     if (!looksJson(t) && !FILLKW.test(t)) return;
-    post('ws', { url: String(url || ''), body: t });
+    // incoming frames feed fill detection; outgoing (order submissions) go to
+    // a diagnostic-only channel so cancelled/unfilled orders never become fills
+    post(dir === 'out' ? 'wsout' : 'ws', { url: String(url || ''), body: t, dir: dir || 'in' });
   }
-  function relayWsData(url, d) {
+  function relayWsBinary(url, bytes, dir) {
     try {
-      if (typeof d === 'string') { relayWsText(url, d); return; }
+      if (!bytes || !bytes.length) return;
+      // try a UTF-8 decode first — some platforms send JSON as binary
+      var txt = '';
+      try { txt = new TextDecoder('utf-8', { fatal: false }).decode(bytes); } catch (e) {}
+      if (looksJson(txt) || FILLKW.test(txt)) { relayWsText(url, txt, dir); return; }
+      // otherwise keep the raw bytes (base64) so the format can be decoded later
+      recordShape('ws-' + (dir || 'in'), txt || '[binary]', true);
+      if (bytes.length > 400000) return;
+      post('wsbin', { url: String(url || ''), b64: bytesToB64(bytes), len: bytes.length, dir: dir || 'in' });
+    } catch (e) {}
+  }
+  function relayWsData(url, d, dir) {
+    try {
+      if (typeof d === 'string') { relayWsText(url, d, dir); return; }
       if (d && typeof d === 'object') {
-        if (d instanceof ArrayBuffer) { relayWsText(url, new TextDecoder('utf-8', { fatal: false }).decode(new Uint8Array(d))); return; }
-        if (d.buffer && d.byteLength != null) { relayWsText(url, new TextDecoder('utf-8', { fatal: false }).decode(d)); return; }
+        if (d instanceof ArrayBuffer) { relayWsBinary(url, new Uint8Array(d), dir); return; }
+        if (d.buffer && d.byteLength != null) { relayWsBinary(url, new Uint8Array(d.buffer, d.byteOffset || 0, d.byteLength), dir); return; }
         if (typeof Blob !== 'undefined' && d instanceof Blob) {
-          if (d.size < 1500000 && d.text) d.text().then(function (t) { relayWsText(url, t); }).catch(function () {});
+          if (d.size < 1500000 && d.arrayBuffer) d.arrayBuffer().then(function (ab) { relayWsBinary(url, new Uint8Array(ab), dir); }).catch(function () {});
           return;
         }
       }
     } catch (e) {}
   }
 
-  // ---- WebSocket ----
+  // ---- WebSocket (receive + send) ----
   try {
     var OWS = window.WebSocket;
     if (OWS) {
       var NWS = function (url, protos) {
         var ws = arguments.length > 1 ? new OWS(url, protos) : new OWS(url);
-        try { ws.addEventListener('message', function (ev) { try { relayWsData(url, ev.data); } catch (e) {} }); } catch (e) {}
+        try { post('wsopen', { url: String(url || '') }); } catch (e) {}
+        try { ws.addEventListener('message', function (ev) { try { relayWsData(url, ev.data, 'in'); } catch (e) {} }); } catch (e) {}
+        try {
+          var OSend = ws.send;
+          ws.send = function (data) { try { relayWsData(url, data, 'out'); } catch (e) {} return OSend.apply(this, arguments); };
+        } catch (e) {}
         return ws;
       };
       try {
@@ -78,9 +126,7 @@
         var p = OF.apply(this, a);
         try {
           p.then(function (r) {
-            try {
-              r.clone().text().then(function (s) { if (looksJson(s) && s.length < 4000000) post('req', { url: String(u), body: s }); }).catch(function () {});
-            } catch (e) {}
+            try { r.clone().text().then(function (s) { if (looksJson(s) && s.length < 4000000) post('req', { url: String(u), body: s }); }).catch(function () {}); } catch (e) {}
           }).catch(function () {});
         } catch (e) {}
         return p;
@@ -104,6 +150,26 @@
       } catch (e) {}
       return OS.apply(this, arguments);
     };
+  } catch (e) {}
+
+  // ---- SAFE worker census (does NOT modify the worker) ----
+  try {
+    var OWk = window.Worker;
+    if (OWk) {
+      window.Worker = function (url, opts) {
+        try { post('worker', { url: String(url || ''), kind: 'worker' }); } catch (e) {}
+        return arguments.length > 1 ? new OWk(url, opts) : new OWk(url);
+      };
+      try { window.Worker.prototype = OWk.prototype; } catch (e) {}
+    }
+    var OSk = window.SharedWorker;
+    if (OSk) {
+      window.SharedWorker = function (url, opts) {
+        try { post('worker', { url: String(url || ''), kind: 'shared' }); } catch (e) {}
+        return arguments.length > 1 ? new OSk(url, opts) : new OSk(url);
+      };
+      try { window.SharedWorker.prototype = OSk.prototype; } catch (e) {}
+    }
   } catch (e) {}
 
   post('ready', { url: location.href });
