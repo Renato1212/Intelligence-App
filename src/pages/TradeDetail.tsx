@@ -7,7 +7,7 @@ import { CRITERIA, DOMAINS, domainOf, GRADE_LEVELS } from '../domain/taxonomy';
 import type { CriterionId, Execution, GradeLevel, Trade } from '../domain/types';
 import { db } from '../lib/db';
 import { downloadFile, openPrintView, tradeDebriefHtml, tradeDebriefMarkdown } from '../lib/exporters';
-import { applyFillsToTrade, computeLadder, ORDER_TYPES, sortFills } from '../lib/fills';
+import { applyFillsToTrade, computeLadder, ORDER_TYPES, parseFillsText, sortFills } from '../lib/fills';
 import { fmtDate, fmtDuration, fmtMoney, fmtR, fmtTime } from '../lib/format';
 import { rMultiple } from '../lib/stats';
 
@@ -360,6 +360,9 @@ function fromLocalInput(v: string): string {
 function ExecutionLogger({ trade, onApply }: { trade: Trade; onApply: (execs: Execution[]) => void }) {
   const [fills, setFills] = useState<Execution[]>(() => sortFills(trade.executions ?? []));
   const [dirty, setDirty] = useState(false);
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [pasteText, setPasteText] = useState('');
+  const [pasteMsg, setPasteMsg] = useState<string | null>(null);
 
   // reload when the trade identity changes (navigating between trades)
   useEffect(() => {
@@ -401,6 +404,18 @@ function ExecutionLogger({ trade, onApply }: { trade: Trade; onApply: (execs: Ex
     setFills([entry, exit]);
     setDirty(true);
   };
+  const doPaste = () => {
+    const res = parseFillsText(pasteText, trade.date);
+    if (!res.fills.length) {
+      setPasteMsg('No fills found — paste rows that include side, quantity and price (with or without a header).');
+      return;
+    }
+    setFills((fs) => sortFills([...fs, ...res.fills]));
+    setDirty(true);
+    setPasteText('');
+    setPasteOpen(false);
+    setPasteMsg(null);
+  };
 
   const maxSize = Math.max(...rows.map((r) => r.position), 0);
 
@@ -414,6 +429,7 @@ function ExecutionLogger({ trade, onApply }: { trade: Trade; onApply: (execs: Ex
           </span>
         </div>
         <div className="row" style={{ gap: 6 }}>
+          <button className="btn sm" onClick={() => { setPasteOpen((o) => !o); setPasteMsg(null); }}>⎘ Paste fills</button>
           <button className="btn sm" onClick={addRow}>+ Add fill</button>
           {fills.length === 0 && (trade.entryPrice || trade.exitPrice) ? (
             <button className="btn sm" title="Start from the averaged entry/exit, then refine each fill" onClick={seedFromSummary}>
@@ -427,6 +443,27 @@ function ExecutionLogger({ trade, onApply }: { trade: Trade; onApply: (execs: Ex
           )}
         </div>
       </div>
+
+      {pasteOpen && (
+        <div style={{ marginTop: 10, padding: 12, border: '1px solid var(--hairline)', borderRadius: 8, background: 'var(--surface)' }}>
+          <div className="small muted" style={{ marginBottom: 6 }}>
+            Select your order-history / fills rows in Trader One (or any broker) and paste them here — no need to type each order.
+            Columns in any order, with or without a header: it reads side, quantity, price, time and order type.
+          </div>
+          <textarea
+            value={pasteText}
+            onChange={(e) => setPasteText(e.target.value)}
+            rows={5}
+            placeholder={'Time\tSide\tQty\tPrice\tType\n14:30:05\tBuy\t2\t5000.25\tMarket\n14:45:00\tSell\t2\t5010.00\tLimit'}
+            style={{ width: '100%', fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 12 }}
+          />
+          {pasteMsg && <div className="small" style={{ color: 'var(--loss)', marginTop: 6 }}>{pasteMsg}</div>}
+          <div className="row" style={{ gap: 6, marginTop: 8 }}>
+            <button className="btn primary sm" onClick={doPaste}>Parse &amp; add fills</button>
+            <button className="btn sm" onClick={() => { setPasteOpen(false); setPasteText(''); setPasteMsg(null); }}>Cancel</button>
+          </div>
+        </div>
+      )}
 
       {fills.length === 0 ? (
         <p className="muted small" style={{ margin: '10px 0 0' }}>
