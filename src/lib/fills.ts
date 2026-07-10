@@ -155,3 +155,149 @@ export const ORDER_TYPES: { id: OrderType; label: string }[] = [
   { id: 'stop', label: 'Stop' },
   { id: 'stop-limit', label: 'Stop-limit' },
 ];
+
+/* ----------------------------- paste import ----------------------------- */
+
+function orderTypeOf(raw: string): OrderType {
+  const s = raw.toLowerCase();
+  if (s.includes('stop') && s.includes('lim')) return 'stop-limit';
+  if (s.includes('stop') || /\bstp\b/.test(s)) return 'stop';
+  if (s.includes('lim') || /\blmt\b/.test(s)) return 'limit';
+  if (s.includes('mkt') || s.includes('market')) return 'market';
+  return 'unknown';
+}
+function numOf(raw: string): number | null {
+  if (raw == null) return null;
+  const m = String(raw).replace(/[$,\s]/g, '').match(/-?\d+(?:\.\d+)?/);
+  if (!m) return null;
+  const n = Number(m[0]);
+  return isFinite(n) ? n : null;
+}
+/** Turn a cell into an ISO instant, tolerating "HH:MM:SS", full dates, epoch ms. */
+function timeOf(raw: string, fallbackDate: string): string | null {
+  const s = String(raw || '').trim();
+  if (!s) return null;
+  // epoch millis / seconds
+  if (/^\d{10,13}$/.test(s)) {
+    const n = Number(s);
+    const d = new Date(n < 1e12 ? n * 1000 : n);
+    return isNaN(d.getTime()) ? null : d.toISOString();
+  }
+  // time-only → attach the trade's date (or today)
+  if (/^\d{1,2}:\d{2}(:\d{2})?(\s?[AaPp][Mm])?$/.test(s)) {
+    const base = fallbackDate || new Date().toISOString().slice(0, 10);
+    const d = new Date(`${base} ${s}`);
+    return isNaN(d.getTime()) ? null : d.toISOString();
+  }
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d.toISOString();
+}
+function splitRow(line: string): string[] {
+  if (line.includes('\t')) return line.split('\t').map((c) => c.trim());
+  if (line.includes(',') && !/\d,\d{3}\b/.test(line)) return line.split(',').map((c) => c.trim());
+  return line.trim().split(/\s{2,}|\s(?=\d{1,2}:\d)|(?<=\d)\s(?=[A-Za-z])/).map((c) => c.trim()).filter(Boolean);
+}
+
+const HDR = {
+  side: /\b(side|action|b\/s|buy\/sell|direction)\b/i,
+  qty: /\b(qty|quantity|size|contracts|filled|lots|volume)\b/i,
+  price: /\b(price|px|avg|fill price)\b/i,
+  time: /\b(time|date|filled|executed|timestamp)\b/i,
+  type: /\b(type|order type|ordertype)\b/i,
+  sym: /\b(symbol|instrument|contract|product|ticker)\b/i,
+};
+function looksHeader(cells: string[]): boolean {
+  const joined = cells.join(' ');
+  const hits = [HDR.side, HDR.qty, HDR.price, HDR.time, HDR.type].filter((rx) => rx.test(joined)).length;
+  const anyNumericPrice = cells.some((c) => /^\$?-?\d+\.\d+$/.test(c.replace(/,/g, '')));
+  return hits >= 2 && !anyNumericPrice;
+}
+function sideOf(cell: string): 'BUY' | 'SELL' | null {
+  const s = cell.trim().toLowerCase();
+  if (/^(s|sell|short|sld|sold|so)/.test(s)) return 'SELL';
+  if (/^(b|buy|long|bot|bought|bo)/.test(s)) return 'BUY';
+  return null;
+}
+
+export interface PasteResult {
+  fills: Execution[];
+  symbol: string | null;
+  matched: number;
+  skipped: number;
+}
+
+/**
+ * Parse a pasted block of order-history / fills rows into executions — so a
+ * trader can select the fills grid in Trader One (or any broker), paste once,
+ * and get every scale-in/out with its order type and price, without typing
+ * each order. Handles tab / comma / multi-space columns, with or without a
+ * header row, and positional detection when there is no header.
+ */
+export function parseFillsText(text: string, fallbackDate = ''): PasteResult {
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !/^[-=\s]+$/.test(l));
+  if (!lines.length) return { fills: [], symbol: null, matched: 0, skipped: 0 };
+
+  let headerCells: string[] | null = null;
+  const firstCells = splitRow(lines[0]);
+  if (looksHeader(firstCells)) headerCells = firstCells.map((c) => c.toLowerCase());
+  const dataLines = headerCells ? lines.slice(1) : lines;
+
+  const colIndex = (rx: RegExp) => (headerCells ? headerCells.findIndex((h) => rx.test(h)) : -1);
+  const ci = headerCells
+    ? { side: colIndex(HDR.side), qty: colIndex(HDR.qty), price: colIndex(HDR.price), time: colIndex(HDR.time), type: colIndex(HDR.type), sym: colIndex(HDR.sym) }
+    : null;
+
+  const fills: Execution[] = [];
+  let symbol: string | null = null;
+  let skipped = 0;
+
+  for (const line of dataLines) {
+    const cells = splitRow(line);
+    if (!cells.length) continue;
+
+    let side: 'BUY' | 'SELL' | null = null;
+    let qty: number | null = null;
+    let price: number | null = null;
+    let time: string | null = null;
+    let otype: OrderType = 'unknown';
+    let sym: string | null = null;
+
+    if (ci) {
+      if (ci.side >= 0) side = sideOf(cells[ci.side] ?? '');
+      if (ci.qty >= 0) qty = numOf(cells[ci.qty] ?? '');
+      if (ci.price >= 0) price = numOf(cells[ci.price] ?? '');
+      if (ci.time >= 0) time = timeOf(cells[ci.time] ?? '', fallbackDate);
+      if (ci.type >= 0) otype = orderTypeOf(cells[ci.type] ?? '');
+      if (ci.sym >= 0) sym = (cells[ci.sym] ?? '').trim() || null;
+    } else {
+      // positional heuristic: scan cells for each field
+      for (const c of cells) {
+        if (!side) { const sd = sideOf(c); if (sd) { side = sd; continue; } }
+        if (otype === 'unknown') { const ot = orderTypeOf(c); if (ot !== 'unknown') { otype = ot; continue; } }
+        if (!time) { const t = timeOf(c, fallbackDate); if (t && /[:\-/]/.test(c)) { time = t; continue; } }
+      }
+      // remaining numeric cells: the decimal is the price, a small integer is qty
+      const nums = cells.map(numOf).filter((n): n is number => n != null);
+      const decimal = cells.find((c) => /^\$?-?\d+\.\d+$/.test(c.replace(/,/g, '')));
+      if (decimal) price = numOf(decimal);
+      const intCell = nums.find((n) => Number.isInteger(n) && Math.abs(n) < 100000 && n !== price);
+      if (intCell != null) qty = intCell;
+      if (price == null && nums.length) price = nums[nums.length - 1];
+      // symbol: a token of letters+digits like ESU5, MESU5, 6E
+      sym = cells.find((c) => /^[A-Z]{1,4}[A-Z0-9]{0,4}\d?$/.test(c) && /[A-Z]/.test(c) && sideOf(c) == null && orderTypeOf(c) === 'unknown') ?? null;
+    }
+
+    if (price == null || qty == null || qty === 0) { skipped++; continue; }
+    if (!side) { skipped++; continue; }
+    if (sym && !symbol) symbol = sym.replace(/\s+/g, '');
+    fills.push({
+      time: time || (fallbackDate ? `${fallbackDate}T00:00:00.000Z` : new Date().toISOString()),
+      action: side,
+      qty: Math.abs(qty),
+      price,
+      orderType: otype,
+    });
+  }
+
+  return { fills: sortFills(fills), symbol, matched: fills.length, skipped };
+}

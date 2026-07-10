@@ -79,6 +79,10 @@ profile is charted as a radar in Edge Analytics, so you can see which skill is l
   computed live. Saving recomputes the trade's entry/exit/size/P&L from the fills, so a hand-logged
   trade is a first-class one. Fills captured from Trader One land in the same logger and can be
   corrected by hand — so tracking every decision never depends on scraping working.
+- **Paste fills** — the fastest path when you don't want to type anything: select your order-history
+  rows in Trader One (or any broker), hit **Paste fills** and the whole block parses into the ladder
+  at once — side, quantity, price, time and order type, in any column order, with or without a
+  header, tab / comma / space separated. Every scale-in and partial, captured in one paste.
 - **Study filters** — combine domain, instrument, date and multi-tag filters (setups, phases,
   data events like NFP / CPI / ISM…) across trades, and filter journal days by the tags of the
   trades inside them.
