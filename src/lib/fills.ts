@@ -11,7 +11,7 @@
  * and evolving average price computed the same way a risk desk would.
  */
 import type { Execution, OrderType, Side, Trade } from '../domain/types';
-import { pointValue } from './contracts';
+import { pointValue, symbolRoot } from './contracts';
 
 export type FillRole = 'Entry' | 'Scale-in' | 'Scale-out' | 'Exit';
 
@@ -222,6 +222,8 @@ function sideOf(cell: string): 'BUY' | 'SELL' | null {
 export interface PasteResult {
   fills: Execution[];
   symbol: string | null;
+  /** fills with their per-row symbol (when the paste carries one) — aligned data for multi-symbol grouping */
+  perFill: { exec: Execution; symbol: string | null }[];
   matched: number;
   skipped: number;
 }
@@ -235,7 +237,7 @@ export interface PasteResult {
  */
 export function parseFillsText(text: string, fallbackDate = ''): PasteResult {
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !/^[-=\s]+$/.test(l));
-  if (!lines.length) return { fills: [], symbol: null, matched: 0, skipped: 0 };
+  if (!lines.length) return { fills: [], symbol: null, perFill: [], matched: 0, skipped: 0 };
 
   let headerCells: string[] | null = null;
   const firstCells = splitRow(lines[0]);
@@ -247,7 +249,7 @@ export function parseFillsText(text: string, fallbackDate = ''): PasteResult {
     ? { side: colIndex(HDR.side), qty: colIndex(HDR.qty), price: colIndex(HDR.price), time: colIndex(HDR.time), type: colIndex(HDR.type), sym: colIndex(HDR.sym) }
     : null;
 
-  const fills: Execution[] = [];
+  const collected: { exec: Execution; symbol: string | null }[] = [];
   let symbol: string | null = null;
   let skipped = 0;
 
@@ -290,14 +292,104 @@ export function parseFillsText(text: string, fallbackDate = ''): PasteResult {
     if (price == null || qty == null || qty === 0) { skipped++; continue; }
     if (!side) { skipped++; continue; }
     if (sym && !symbol) symbol = sym.replace(/\s+/g, '');
-    fills.push({
-      time: time || (fallbackDate ? `${fallbackDate}T00:00:00.000Z` : new Date().toISOString()),
-      action: side,
-      qty: Math.abs(qty),
-      price,
-      orderType: otype,
+    collected.push({
+      exec: {
+        time: time || (fallbackDate ? `${fallbackDate}T00:00:00.000Z` : new Date().toISOString()),
+        action: side,
+        qty: Math.abs(qty),
+        price,
+        orderType: otype,
+      },
+      symbol: sym ? sym.replace(/\s+/g, '') : null,
     });
   }
 
-  return { fills: sortFills(fills), symbol, matched: fills.length, skipped };
+  const perFill = collected
+    .map((p, i) => ({ p, i }))
+    .sort((a, b) => a.p.exec.time.localeCompare(b.p.exec.time) || a.i - b.i)
+    .map((x) => x.p);
+  return { fills: perFill.map((p) => p.exec), symbol, perFill, matched: perFill.length, skipped };
+}
+
+/**
+ * Split a day's fills into round-trip trades: within each symbol, every
+ * flat-to-flat segment becomes one trade with its executions attached. A fill
+ * that flips through zero is split so the overshoot opens the next trade.
+ * Used by the Import page so a whole day's order history pastes in at once.
+ */
+export function groupFillsIntoTrades(
+  perFill: { exec: Execution; symbol: string | null }[],
+  fallbackSymbol: string,
+  account = '',
+): { trades: Trade[]; executionPool: { instrument: string; exec: Execution }[]; openLeftover: number } {
+  const bySymbol = new Map<string, Execution[]>();
+  const executionPool: { instrument: string; exec: Execution }[] = [];
+  for (const { exec, symbol } of perFill) {
+    const root = symbolRoot(symbol || fallbackSymbol || 'UNKNOWN');
+    if (!bySymbol.has(root)) bySymbol.set(root, []);
+    bySymbol.get(root)!.push(exec);
+    executionPool.push({ instrument: root, exec });
+  }
+
+  const trades: Trade[] = [];
+  let openLeftover = 0;
+
+  for (const [instrument, execs] of bySymbol) {
+    let position = 0;
+    let segment: Execution[] = [];
+    const closeSegment = () => {
+      if (!segment.length) return;
+      const side: Side = segment[0].action === 'BUY' ? 'LONG' : 'SHORT';
+      const skeleton: Trade = {
+        date: segment[0].time.slice(0, 10),
+        instrument,
+        side,
+        entryTime: segment[0].time,
+        exitTime: segment[segment.length - 1].time,
+        entryPrice: 0,
+        exitPrice: 0,
+        qty: 1,
+        pnl: 0,
+        fees: 0,
+        plannedRisk: null,
+        domain: null,
+        category: null,
+        tags: [],
+        strategyId: null,
+        description: '',
+        learned: '',
+        applyNext: '',
+        videoUrl: '',
+        grades: {},
+        source: 'capture',
+        account,
+      };
+      trades.push(applyFillsToTrade(skeleton, segment));
+      segment = [];
+    };
+
+    for (const e of sortFills(execs)) {
+      const delta = (e.action === 'BUY' ? 1 : -1) * Math.abs(e.qty);
+      const after = position + delta;
+      if (position !== 0 && after !== 0 && Math.sign(after) !== Math.sign(position)) {
+        // flip through zero: close with the covering portion, reopen with the rest
+        const closing = Math.abs(position);
+        segment.push({ ...e, qty: closing });
+        position = 0;
+        closeSegment();
+        segment.push({ ...e, qty: Math.abs(delta) - closing });
+        position = after;
+        continue;
+      }
+      segment.push(e);
+      position = after;
+      if (position === 0) closeSegment();
+    }
+    if (segment.length) {
+      openLeftover += segment.length; // unclosed position — don't invent a trade
+    }
+  }
+
+  trades.sort((a, b) => a.entryTime.localeCompare(b.entryTime));
+  return { trades, executionPool, openLeftover };
 }

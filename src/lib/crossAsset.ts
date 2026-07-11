@@ -135,6 +135,147 @@ export function analyzeCrossAsset(series: AssetSeries[]): CrossAssetRead | null 
   return { asOf, states, pairs, breaks };
 }
 
+/* -------------------------------- breadth -------------------------------- */
+
+export const SECTORS: { symbol: string; label: string }[] = [
+  { symbol: 'XLK', label: 'Tech' },
+  { symbol: 'XLF', label: 'Financials' },
+  { symbol: 'XLE', label: 'Energy' },
+  { symbol: 'XLV', label: 'Health' },
+  { symbol: 'XLI', label: 'Industrials' },
+  { symbol: 'XLY', label: 'Discretionary' },
+  { symbol: 'XLP', label: 'Staples' },
+  { symbol: 'XLU', label: 'Utilities' },
+  { symbol: 'XLB', label: 'Materials' },
+  { symbol: 'XLRE', label: 'Real Estate' },
+  { symbol: 'XLC', label: 'Comm Svcs' },
+];
+
+export interface SectorState {
+  symbol: string;
+  label: string;
+  ret20: number;
+  above50: boolean;
+  /** % distance from the 50DMA */
+  dist50: number;
+}
+
+export interface BreadthRead {
+  asOf: string;
+  sectors: SectorState[];
+  /** how many of the 11 sectors trade above their 50DMA */
+  above50Count: number;
+  /** equal-weight vs cap-weight S&P, 20-day relative return (% — + = broad participation) */
+  rspSpy20: number | null;
+  read: string;
+}
+
+/** Pure: sector-rotation + participation read from daily closes. */
+export function analyzeBreadth(series: AssetSeries[]): BreadthRead | null {
+  const bySym = new Map(series.map((s) => [s.symbol, s.closes]));
+  const sectors: SectorState[] = [];
+  let asOf = '';
+  for (const spec of SECTORS) {
+    const closes = bySym.get(spec.symbol);
+    if (!closes || closes.length < 55) continue;
+    const last = closes[closes.length - 1];
+    asOf = last.date > asOf ? last.date : asOf;
+    const ma50 = closes.slice(-50).reduce((s, c) => s + c.close, 0) / Math.min(50, closes.length);
+    const ret20 = (last.close / closes[Math.max(0, closes.length - 21)].close - 1) * 100;
+    sectors.push({
+      symbol: spec.symbol,
+      label: spec.label,
+      ret20,
+      above50: last.close >= ma50,
+      dist50: (last.close / ma50 - 1) * 100,
+    });
+  }
+  if (sectors.length < 6) return null;
+  sectors.sort((a, b) => b.ret20 - a.ret20);
+  const above50Count = sectors.filter((s) => s.above50).length;
+
+  let rspSpy20: number | null = null;
+  const rsp = bySym.get('RSP');
+  const spy = bySym.get('SPY');
+  if (rsp && spy && rsp.length > 21 && spy.length > 21) {
+    const r = rsp[rsp.length - 1].close / rsp[Math.max(0, rsp.length - 21)].close - 1;
+    const s = spy[spy.length - 1].close / spy[Math.max(0, spy.length - 21)].close - 1;
+    rspSpy20 = (r - s) * 100;
+  }
+
+  const frac = above50Count / sectors.length;
+  const lead = sectors.slice(0, 2).map((s) => s.label).join(' & ');
+  const lag = sectors[sectors.length - 1].label;
+  const read =
+    frac >= 0.72
+      ? `Broad advance: ${above50Count}/${sectors.length} sectors above their 50DMA, led by ${lead}. Rallies with this breadth are hard to fade — dips are entries, not warnings.`
+      : frac <= 0.35
+        ? `Narrow tape: only ${above50Count}/${sectors.length} sectors hold their 50DMA (weakest: ${lag}). Index strength here rides a few names — breaks travel further and bounces need confirmation.`
+        : `Split tape: ${above50Count}/${sectors.length} sectors above the 50DMA — rotation (${lead} leading, ${lag} lagging) rather than direction. Relative-value moves beat index bets until this resolves.`;
+
+  return {
+    asOf,
+    sectors,
+    above50Count,
+    rspSpy20,
+    read: rspSpy20 != null ? `${read} Equal-weight vs cap-weight is ${rspSpy20 >= 0 ? 'out' : 'under'}performing by ${Math.abs(rspSpy20).toFixed(1)}% over 20 days${rspSpy20 < -1 ? ' — the average stock is NOT confirming the index.' : '.'}` : read,
+  };
+}
+
+const BREADTH_CACHE_KEY = 'ei-breadth-cache-v1';
+
+/** Cached-first breadth load (sector ETFs + RSP/SPY via the FMP key). */
+export async function loadBreadth(force = false): Promise<{ read: BreadthRead | null; error: string | null }> {
+  const key = getMarketApiKey();
+  let cached: CacheShape | null = null;
+  try {
+    cached = JSON.parse(localStorage.getItem(BREADTH_CACHE_KEY) ?? 'null') as CacheShape | null;
+  } catch {
+    cached = null;
+  }
+  if (!force && cached && Date.now() - new Date(cached.fetchedAt).getTime() < FRESH_MS) {
+    return { read: analyzeBreadth(cached.series), error: null };
+  }
+  if (!key) {
+    if (cached) return { read: analyzeBreadth(cached.series), error: null };
+    return { read: null, error: 'no-key' };
+  }
+  const wanted = [...SECTORS.map((s) => s.symbol), 'RSP', 'SPY'];
+  const series: AssetSeries[] = [];
+  let lastErr: string | null = null;
+  await Promise.all(
+    wanted.map(async (symbol) => {
+      const url = `https://financialmodelingprep.com/api/v3/historical-price-full/${symbol}?serietype=line&timeseries=90&apikey=${key}`;
+      try {
+        const res = await fetch(url);
+        if (!res.ok) {
+          lastErr = `Market-data service returned ${res.status}.`;
+          return;
+        }
+        const raw = (await res.json()) as { historical?: { date?: string; close?: number }[] };
+        const closes = (raw.historical ?? [])
+          .map((h) => ({ date: String(h.date ?? ''), close: Number(h.close) }))
+          .filter((h) => h.date && isFinite(h.close))
+          .sort((x, y) => x.date.localeCompare(y.date));
+        if (closes.length >= 55) series.push({ symbol, closes });
+      } catch {
+        lastErr = 'Could not reach the market-data service (network/CORS).';
+      }
+    }),
+  );
+  if (series.length >= 8) {
+    const cache: CacheShape = { fetchedAt: new Date().toISOString(), series };
+    try {
+      localStorage.setItem(BREADTH_CACHE_KEY, JSON.stringify(cache));
+    } catch {
+      // best effort
+    }
+    return { read: analyzeBreadth(series), error: null };
+  }
+  if (cached) return { read: analyzeBreadth(cached.series), error: lastErr ?? 'Refresh failed.' };
+  return { read: null, error: lastErr ?? 'Refresh failed.' };
+}
+
 /* ------------------------------- fetching ------------------------------- */
 
 const CACHE_KEY = 'ei-crossasset-cache-v1';

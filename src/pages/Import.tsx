@@ -6,6 +6,8 @@ import { bookmarkletCode, bookmarkletHref } from '../lib/bookmarklet';
 import { attachExecutionsToTrades, CaptureError, importCapture, isCapturePayload, parseCapture, type CaptureDiagnostics, type CaptureParseResult } from '../lib/capture';
 import { db } from '../lib/db';
 import { fmtDate, fmtMoney, fmtTime } from '../lib/format';
+import { groupFillsIntoTrades, parseFillsText } from '../lib/fills';
+import { makeImportKey } from '../lib/importers';
 import { importCSV, type ImportResult } from '../lib/importers';
 
 export default function ImportPage() {
@@ -29,8 +31,39 @@ export default function ImportPage() {
     setCaptureDiag(null);
     setFileName(name);
     try {
-      if (isCapturePayload(text)) setCapture(parseCapture(text));
-      else setResult(importCSV(text));
+      if (isCapturePayload(text)) {
+        setCapture(parseCapture(text));
+        return;
+      }
+      let res: ImportResult | null = null;
+      let csvError: unknown = null;
+      try {
+        res = importCSV(text);
+      } catch (err) {
+        csvError = err;
+      }
+      if (!res || (res.trades.length === 0 && !(res.executionPool?.length))) {
+        // tolerant fallback: a pasted order-history block (whole day of fills)
+        const p = parseFillsText(text);
+        if (p.fills.length >= 1) {
+          const g = groupFillsIntoTrades(p.perFill, p.symbol ?? 'UNKNOWN');
+          for (const t of g.trades) t.importKey = makeImportKey(t);
+          if (g.trades.length || g.executionPool.length) {
+            res = {
+              trades: g.trades,
+              format: 'fills',
+              warnings: g.openLeftover
+                ? [`${g.openLeftover} fill(s) belong to a position that never closed in this paste — they were not turned into a trade.`]
+                : [],
+              sourceRows: [],
+              executionPool: g.executionPool,
+            };
+            csvError = null;
+          }
+        }
+      }
+      if (res) setResult(res);
+      else if (csvError) throw csvError;
     } catch (e) {
       if (e instanceof CaptureError) setCaptureDiag(e.diagnostics);
       else setError(e instanceof Error ? e.message : String(e));

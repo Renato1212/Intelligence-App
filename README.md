@@ -18,6 +18,12 @@ performance analyst with full access to your data.
   built-in table of CME/Eurex contract point values (ES, MES, NQ, MNQ, CL, MCL, GC, 6E, ZN, FDAX …).
 - **Any other platform** — any CSV with symbol, entry/exit time, price, quantity and (optionally)
   P&L columns works. Headers are matched by name; column order and naming variants don't matter.
+- **Paste your fills, no file needed** — copy a day's fill/order rows from any platform window
+  (Trader One, R Trader, broker statements…) and paste them on the Import page: fills are parsed
+  from free-form text, grouped **flat-to-flat into trades per instrument** (position flips split
+  correctly), and every fill lands in the trade's execution ladder with its role (entry, add,
+  partial exit, exit), blended average and per-fill realized points. The same paste box exists
+  inside any single trade to attach its execution ladder after the fact.
 - Re-importing the same file is safe — duplicates are detected and skipped.
 - **Private by default, synced by choice**: all data lives locally in your browser (IndexedDB) and
   works fully offline. Create a free account (Account page) to sync everything to your own cloud
@@ -142,6 +148,11 @@ One page that answers "what regime am I trading in?" before the open:
   markets, or one alone?" computed: a 20-day correlation heatmap across equities, bonds, dollar,
   gold, crude and euro, **correlation-break detection** (pairs that left their 60-day norm — gold
   outlined), and each market's trend + volatility-percentile state.
+- **Breadth & sector rotation** *(Technicals/Sentiment)* — with the free market-data key: how many
+  of the 11 S&P sectors trade above their 50-day average, equal-weight vs cap-weight (RSP−SPY)
+  divergence, and a 20-day sector-rotation ranking with momentum bars — sortable by momentum or
+  distance from the 50DMA — so narrow rallies and defensive rotations are visible before they hit
+  the index.
 - **The flow calendar** *(Flow Events)* — OPEX, quad witching, futures roll, VIX expiry,
   month/quarter-end rebalancing, auction weeks and new-month inflows, computed from exchange rules
   with zero API — merged into the same calendar as the economic events, so flow days appear in the
@@ -150,6 +161,28 @@ One page that answers "what regime am I trading in?" before the open:
 - **The learning layer** — every panel carries a collapsible **Principle** written in the
   framework's language, so the platform teaches the meaning and application of each domain every
   time it's used.
+
+### Options & Vol — the dealer-flow layer (free, keyless)
+The mechanics that move the index intraday, from CBOE's own delayed-quote feed — no key, no
+account:
+
+- **The VIX complex, live** — VIX, VIX9D and VIX3M refreshing every minute, with the 9D/30D and
+  30D/3M term-structure ratios computed into a **vol regime** (calm carry / nervous / event
+  premium / stress-backwardation) and a plain-language read of what that regime means for day
+  trading index futures.
+- **SPX dealer gamma & the walls** — the full SPX option chain (per-strike open interest + gamma)
+  turned into a net gamma-exposure profile: **put wall**, **call wall**, the **zero-gamma flip
+  point**, and the current **gamma regime** (positive = dealers dampen moves, pinning; negative =
+  dealers amplify moves, air pockets and trend days). A per-strike GEX chart brackets the session
+  around spot, filterable by **nearest expiry / monthly OPEX / all expiries**.
+- **OPEX concentration** — how much of the open interest sits at the nearest expiry, with the next
+  OPEX date from the flow calendar, so expiry-driven pinning and the post-OPEX "unclenching" are
+  anticipated rather than discovered.
+- **The session's flow map** — the recurring mechanical windows of every US day (cash open &
+  opening drive, the 10:00 data window, lunch/European close, afternoon re-engagement, the 15:50
+  MOC imbalance window), each with *why it exists* and *the play*.
+- Every panel carries its collapsible **Principle** — vol term structure, dealer gamma/walls/OPEX
+  mechanics, and trading the opens & MOC — so the section teaches the flow domain while you use it.
 
 ### Release intelligence — the data behind every catalyst (free, keyless)
 The Catalysts section doesn't just list NFP and CPI — it shows what each release has actually been
@@ -165,6 +198,8 @@ The Catalysts section doesn't just list NFP and CPI — it shows what each relea
 - **Live consensus → actual** — connect the free FMP key and the week-ahead list carries each
   event's consensus, refreshing every minute on release days; the actual lands next to it with a
   deviation arrow the moment it prints. A countdown chip runs on the next scheduled release.
+- **Filter the week by domain** — one-tap chips cut the week-ahead to economic data, flow events
+  (OPEX, auctions, rebalancing), central banks, or tier-1 only.
 - Everything caches locally: history keeps working offline, and each indicator degrades
   independently with an inline note if a source is unreachable.
 - **Honest dates** — releases whose exact date shifts month to month (CPI, PPI, Retail, JOLTS,
@@ -201,7 +236,11 @@ build automatically.
 ### The Playbook
 The full 5 Edge Domain playbook as an interactive reference — what to look for, how to classify,
 common mistakes and the grading rubric for every domain — with **your own live stats** (trades, P&L,
-win rate, expectancy) displayed next to each domain.
+win rate, expectancy) displayed next to each domain. The Technical domain opens into a **deep
+dive on its four sub-disciplines** — candlesticks & chart patterns, Market Profile & value, DOM
+(depth of market), and footprint & order flow — each with what it reads, the specific patterns
+and behaviors (absorption, delta divergence, spoofing/pulling, poor highs/lows, open types…), and
+the mistakes that cost traders money in that discipline.
 
 ![Playbook](docs/playbook.png)
 
