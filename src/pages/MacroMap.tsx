@@ -13,7 +13,7 @@ import {
 } from 'recharts';
 import { Principle, StatTile } from '../components/ui';
 import { upcomingEvents } from '../lib/calendar';
-import { loadCrossAsset, type CrossAssetRead, type PairCorr } from '../lib/crossAsset';
+import { loadBreadth, loadCrossAsset, type BreadthRead, type CrossAssetRead, type PairCorr } from '../lib/crossAsset';
 import { analyzeRates, loadRates, ratesInsight, type RatesRead } from '../lib/rates';
 import { loadHeadlines, loadNarrative, THEMES, type Headline, type NarrativeLoad, type ThemeSeries } from '../lib/narrative';
 import { fmtDateShort, todayISO, weekdayName } from '../lib/format';
@@ -472,6 +472,118 @@ function NarrativePanel() {
   );
 }
 
+/* ------------------------------ breadth panel ---------------------------- */
+
+function BreadthPanel() {
+  const [read, setRead] = useState<BreadthRead | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [sort, setSort] = useState<'momentum' | 'trend'>('momentum');
+
+  useEffect(() => {
+    let alive = true;
+    void loadBreadth(false).then((r) => {
+      if (!alive) return;
+      setRead(r.read);
+      setError(r.error);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const sectors = useMemo(() => {
+    if (!read) return [];
+    const xs = [...read.sectors];
+    if (sort === 'trend') xs.sort((a, b) => b.dist50 - a.dist50);
+    return xs;
+  }, [read, sort]);
+
+  return (
+    <div className="card">
+      <div className="spread" style={{ alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 6 }}>
+        <div className="card-title" style={{ marginBottom: 0 }}>
+          Breadth &amp; sector rotation <span className="hint">is the average stock confirming the index?</span>
+        </div>
+        <div className="row" style={{ gap: 4, alignItems: 'center' }}>
+          <span className={`chip clickable ${sort === 'momentum' ? 'selected' : ''}`} onClick={() => setSort('momentum')}>20d momentum</span>
+          <span className={`chip clickable ${sort === 'trend' ? 'selected' : ''}`} onClick={() => setSort('trend')}>vs 50DMA</span>
+          {read && <span className="muted small" style={{ marginLeft: 8 }}>as of {fmtDateShort(read.asOf)}</span>}
+        </div>
+      </div>
+
+      {!read ? (
+        <div className="muted small">
+          {error === 'no-key' ? (
+            <>Connect the free FMP key in <b>Trading Day → Preparation</b> and this panel computes sector rotation, % of sectors above their 50DMA, and the equal-weight vs cap-weight participation check.</>
+          ) : error ? (
+            <><b>Market data unreachable:</b> {error}</>
+          ) : (
+            'Computing breadth…'
+          )}
+        </div>
+      ) : (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginBottom: 12 }}>
+            <StatTile
+              small
+              label="Sectors above 50DMA"
+              value={<span className={read.above50Count >= 8 ? 'pos' : read.above50Count <= 4 ? 'neg' : ''}>{read.above50Count}/{read.sectors.length}</span>}
+            />
+            <StatTile
+              small
+              label="Equal-weight vs SPY (20d)"
+              value={read.rspSpy20 != null ? <span className={read.rspSpy20 >= 0 ? 'pos' : 'neg'}>{read.rspSpy20 >= 0 ? '+' : ''}{read.rspSpy20.toFixed(1)}%</span> : '—'}
+              delta="RSP − SPY"
+            />
+            <StatTile small label="Leading" value={read.sectors[0]?.label ?? '—'} delta={read.sectors[0] ? `${read.sectors[0].ret20 >= 0 ? '+' : ''}${read.sectors[0].ret20.toFixed(1)}% 20d` : undefined} />
+            <StatTile small label="Lagging" value={read.sectors[read.sectors.length - 1]?.label ?? '—'} delta={`${read.sectors[read.sectors.length - 1]?.ret20.toFixed(1)}% 20d`} />
+          </div>
+
+          <div className="stack" style={{ gap: 5 }}>
+            {sectors.map((s) => {
+              const v = sort === 'momentum' ? s.ret20 : s.dist50;
+              const w = Math.min(48, Math.abs(v) * (sort === 'momentum' ? 4 : 6));
+              return (
+                <div key={s.symbol} className="row" style={{ gap: 8, alignItems: 'center' }}>
+                  <span className="mono small" style={{ width: 40, fontWeight: 700 }}>{s.symbol}</span>
+                  <span className="small muted" style={{ width: 88 }}>{s.label}</span>
+                  <span className="grade-dot" title={s.above50 ? 'above 50DMA' : 'below 50DMA'} style={{ background: s.above50 ? 'var(--profit)' : 'var(--loss)', flexShrink: 0 }} />
+                  <div style={{ flex: 1, height: 10, background: 'var(--surface)', borderRadius: 4, position: 'relative' }}>
+                    <div style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, width: 1, background: 'var(--axis)' }} />
+                    <div
+                      style={{
+                        position: 'absolute',
+                        left: v >= 0 ? '50%' : `${50 - w}%`,
+                        width: `${w}%`,
+                        top: 1.5,
+                        bottom: 1.5,
+                        borderRadius: 3,
+                        background: v >= 0 ? 'var(--profit)' : 'var(--loss)',
+                      }}
+                    />
+                  </div>
+                  <span className={`mono small ${v >= 0 ? 'pos' : 'neg'}`} style={{ width: 62, textAlign: 'right' }}>
+                    {v >= 0 ? '+' : ''}{v.toFixed(1)}%
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <p className="small" style={{ margin: '12px 0 0', color: 'var(--gold)' }}>{read.read}</p>
+        </>
+      )}
+
+      <Principle domain="Breadth & participation">
+        An index is an average — breadth tells you whether the average is honest. When most sectors hold their 50DMA
+        and equal-weight keeps pace with cap-weight, the advance has soldiers behind the generals: buy dips. When the
+        index grinds up while breadth thins (few sectors above trend, RSP lagging SPY), the move rides a handful of
+        mega-caps — that's the tape where breakdowns travel furthest. Rotation without direction (split sectors) is a
+        relative-value market: the edge moves from "long or short the index" to "long the leader, short the laggard".
+      </Principle>
+    </div>
+  );
+}
+
 /* --------------------------------- page --------------------------------- */
 
 export default function MacroMap() {
@@ -489,6 +601,7 @@ export default function MacroMap() {
       <div className="stack">
         <NarrativePanel />
         <RatesPanel />
+        <BreadthPanel />
         <CrossAssetPanel />
       </div>
     </>

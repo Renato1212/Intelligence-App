@@ -435,8 +435,25 @@ function CompareBar({ label, value, max, money }: { label: string; value: number
   );
 }
 
+type EventFilter = 'all' | 'econ' | 'flow' | 'cb' | 'high';
+const EVENT_FILTERS: { id: EventFilter; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'econ', label: 'Economic' },
+  { id: 'flow', label: 'Flow' },
+  { id: 'cb', label: 'Central banks' },
+  { id: 'high', label: 'High impact' },
+];
+function passesFilter(e: CalendarEvent, f: EventFilter): boolean {
+  if (f === 'all') return true;
+  if (f === 'high') return e.impact === 'high';
+  if (f === 'econ') return e.domain === 'economic-data';
+  if (f === 'flow') return e.domain === 'flow';
+  return e.domain === 'central-banks';
+}
+
 export default function Catalysts() {
   const [anchor, setAnchor] = useState(todayISO());
+  const [filter, setFilter] = useState<EventFilter>('all');
   const nav = useNavigate();
   const trades = useLiveQuery(() => db.trades.toArray(), []) ?? [];
   const now = useNow(30000);
@@ -513,6 +530,13 @@ export default function Catalysts() {
             <div className="card-title" style={{ marginBottom: 0 }}>
               Week ahead <span className="hint">click an event for why it matters &amp; how to play it</span>
             </div>
+            <div className="row" style={{ gap: 4 }}>
+              {EVENT_FILTERS.map((f) => (
+                <span key={f.id} className={`chip clickable ${filter === f.id ? 'selected' : ''}`} onClick={() => setFilter(f.id)}>
+                  {f.label}
+                </span>
+              ))}
+            </div>
             {hasKey ? (
               liveError ? (
                 <span className="muted small">live layer: {liveError}</span>
@@ -527,7 +551,7 @@ export default function Catalysts() {
           </div>
           <div className="stack" style={{ gap: 14 }}>
             {weekDays.map((d) => {
-              const evs = dayEvents(d);
+              const evs = dayEvents(d).filter((e) => passesFilter(e, filter));
               const isToday = d === today;
               return (
                 <div key={d}>
