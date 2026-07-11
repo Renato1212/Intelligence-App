@@ -103,6 +103,17 @@ real cloud profile. (A "continue on this device without an account" link is avai
 use, and the app keeps working fully offline either way — the cloud copy is a mirror, not a
 requirement.)
 
+### Live data connections — see exactly which feeds are live (Settings)
+Whether a free API is actually live for you depends on things only your browser can see — the host's
+CORS policy, your network, and (for the market-data key) whether a key is connected. The Settings
+page pings **every source from your own browser** and shows a green/red board: CFTC (COT), DBnomics
+(official econ history + IMF fallback), GDELT (news), CBOE (VIX & options), the IMF DataMapper, and
+your FMP key — each with a live latency, a sample value pulled from the response (e.g. *VIX 16.42*,
+*SPY 559.10*, *US GDP thru 2027*), and, when a feed is down, the reason (network/CORS vs. HTTP
+error vs. no key). The free market-data key can be pasted right there and the board rechecks
+instantly. A **Force-refresh market data** button drops every cached feed (your key and settings are
+kept) so the next page visit pulls fresh — the fix when you suspect you're seeing cached numbers.
+
 ### AI Coach — turn your AI subscription into a trading analyst
 One click builds a complete Markdown dossier of your journal — overview stats, edge tables by
 domain/setup/hour/instrument, your coach grade profile, every strategy with its sample stats, the
