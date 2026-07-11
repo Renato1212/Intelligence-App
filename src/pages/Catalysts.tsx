@@ -26,10 +26,13 @@ import {
   INDICATORS_BY_EVENT,
   loadIndicator,
   NO_HISTORY_NOTE,
+  PLAYBOOK_INSTRUMENTS,
+  PRINT_PLAYBOOK,
   type IndicatorSeries,
   type IndicatorSpec,
   type PrintStats,
 } from '../lib/econData';
+import { staleGapMonths } from '../lib/econLive';
 import { eventDaySplit, perEventStats, proximitySplit, type PerEventStat } from '../lib/eventStats';
 import { fetchUSCalendarRange, getMarketApiKey, liveReadingsFor, parseReading, type LiveEventRow } from '../lib/market';
 import { addDays, fmtMoney, todayISO, weekdayName } from '../lib/format';
@@ -266,6 +269,124 @@ function PrintChart({ series, stats }: { series: IndicatorSeries; stats: PrintSt
 /** Events offered in the intelligence panel: everything with history or a note. */
 const INTEL_EVENTS = ['NFP', 'CPI', 'PPI', 'JOLTS', 'ISM Mfg', 'ISM Svcs', 'Jobless Claims', 'Retail Sales', 'PCE', 'FOMC'];
 
+/** Data provenance under the chart: where official history ends, what the live layer added. */
+function ProvenanceLine({ series }: { series: IndicatorSeries }) {
+  const last = series.points[series.points.length - 1]?.period ?? null;
+  const gap = staleGapMonths(last);
+  const officialThrough = series.officialThrough ?? null;
+  const liveCount = series.liveCount ?? 0;
+  return (
+    <div className="small" style={{ marginTop: 4 }}>
+      {officialThrough == null ? (
+        <span className="muted">History reconstructed from your market-data key's release calendar (as-released prints, not revised).</span>
+      ) : liveCount > 0 ? (
+        <span className="muted">
+          Official history (DBnomics) to <b>{fmtPeriod(officialThrough)}</b> · extended with <b>{liveCount}</b> as-released prints from your
+          market-data key to <b>{last ? fmtPeriod(last) : '—'}</b>.
+        </span>
+      ) : gap >= 2 ? (
+        <span style={{ color: 'var(--loss)' }}>
+          ⚠ History ends {last ? fmtPeriod(last) : '—'} — the free official mirror has stalled. Connect the free FMP key (Trading Day →
+          Preparation) and the missing prints fill in automatically from the release calendar.
+        </span>
+      ) : (
+        <span className="muted">Official history (DBnomics) to {last ? fmtPeriod(last) : '—'}.</span>
+      )}
+    </div>
+  );
+}
+
+/** The last handful of prints as a table — the raw record behind the chart. */
+function RecentPrints({ series }: { series: IndicatorSeries }) {
+  const spec = series.spec;
+  const pts = series.points.slice(-7);
+  if (pts.length < 2) return null;
+  const rows = pts
+    .map((p, i) => ({ p, d: i > 0 ? p.value - pts[i - 1].value : null }))
+    .slice(1)
+    .reverse();
+  const liveFrom = series.officialThrough;
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div className="small muted" style={{ marginBottom: 6 }}>Recent prints — {spec.label} ({spec.unit})</div>
+      <div style={{ overflowX: 'auto' }}>
+        <table className="data" style={{ minWidth: 380 }}>
+          <thead>
+            <tr><th>Period</th><th style={{ textAlign: 'right' }}>Print</th><th style={{ textAlign: 'right' }}>Δ vs prior</th><th>Source</th></tr>
+          </thead>
+          <tbody>
+            {rows.map(({ p, d }) => (
+              <tr key={p.period}>
+                <td className="mono">{fmtPeriod(p.period)}</td>
+                <td className="mono" style={{ textAlign: 'right', fontWeight: 700 }}>{fmtPrint(p.value, spec, true)}</td>
+                <td className={`mono ${d != null && d > 0 ? 'pos' : d != null && d < 0 ? 'neg' : ''}`} style={{ textAlign: 'right' }}>
+                  {d != null ? fmtPrint(d, spec, true) : '—'}
+                </td>
+                <td className="muted small">{liveFrom != null && p.period > liveFrom ? 'live calendar' : liveFrom == null ? 'live calendar' : 'official'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/** The market-implications study: how this print maps onto each instrument. */
+function ImplicationsStudy({ short }: { short: string }) {
+  const pb = PRINT_PLAYBOOK[short];
+  const [open, setOpen] = useState(false);
+  if (!pb) return null;
+  const arrowColor = (a: string) => (a.includes('↑') ? 'var(--profit)' : a.includes('↓') ? 'var(--loss)' : 'var(--muted)');
+  return (
+    <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--hairline)' }}>
+      <div className="spread" style={{ alignItems: 'center', cursor: 'pointer' }} onClick={() => setOpen((o) => !o)}>
+        <b className="small" style={{ color: 'var(--gold)' }}>{open ? '▾' : '▸'} Market implications — what a {short} surprise does to each instrument</b>
+      </div>
+      {open && (
+        <div style={{ marginTop: 10, display: 'grid', gap: 10 }}>
+          <div className="small"><b>What actually moves the market:</b> <span className="muted">{pb.driver}</span></div>
+          <div style={{ overflowX: 'auto' }}>
+            <table className="data" style={{ minWidth: 480 }}>
+              <thead>
+                <tr>
+                  <th>Print</th>
+                  {PLAYBOOK_INSTRUMENTS.map((s) => <th key={s} style={{ textAlign: 'center' }}>{s}</th>)}
+                  <th>Read</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td style={{ whiteSpace: 'nowrap' }}><b>Hot</b> <span className="muted small">(above cons.)</span></td>
+                  {PLAYBOOK_INSTRUMENTS.map((s) => (
+                    <td key={s} className="mono" style={{ textAlign: 'center', color: arrowColor(pb.hot[s] ?? '≈'), fontWeight: 700 }}>{pb.hot[s] ?? '≈'}</td>
+                  ))}
+                  <td className="muted small">{pb.hotNote}</td>
+                </tr>
+                <tr>
+                  <td style={{ whiteSpace: 'nowrap' }}><b>Cold</b> <span className="muted small">(below cons.)</span></td>
+                  {PLAYBOOK_INSTRUMENTS.map((s) => (
+                    <td key={s} className="mono" style={{ textAlign: 'center', color: arrowColor(pb.cold[s] ?? '≈'), fontWeight: 700 }}>{pb.cold[s] ?? '≈'}</td>
+                  ))}
+                  <td className="muted small">{pb.coldNote}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          {pb.regimeFlip && (
+            <div className="small"><b style={{ color: 'var(--loss)' }}>When the mapping flips:</b> <span className="muted">{pb.regimeFlip}</span></div>
+          )}
+          <div className="small"><b style={{ color: 'var(--gold)' }}>Principle:</b> <span className="muted">{pb.principle}</span></div>
+          <div className="muted small" style={{ opacity: 0.7 }}>
+            Arrows are the typical FIRST move — mechanics, not a promise. Positioning (Market Intel), the vol regime (Options &amp; Vol) and the
+            active narrative (Macro Map) decide whether it extends or fades.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ReleaseIntel({ record, now }: { record: PerEventStat[]; now: number }) {
   const today = todayISO();
   const defaultShort = useMemo(() => {
@@ -311,7 +432,7 @@ function ReleaseIntel({ record, now }: { record: PerEventStat[]; now: number }) 
     <div className="card">
       <div className="spread" style={{ alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
         <div className="card-title" style={{ marginBottom: 0 }}>
-          Release intelligence <span className="hint">what the data itself has been printing — official sources, no key needed</span>
+          Release intelligence <span className="hint">what the data itself has been printing — official history + as-released live prints</span>
         </div>
         {nextOccurrence && (
           <span className="muted small">
@@ -393,13 +514,17 @@ function ReleaseIntel({ record, now }: { record: PerEventStat[]; now: number }) 
                 <span className="small"><span className="grade-dot" style={{ background: '#d3a94f' }} /> Latest print</span>
                 <span className="small muted">band = ±1σ of the prior 2 years · dashed = 2y average</span>
               </div>
+              <ProvenanceLine series={active.series} />
               {stats && activeSpec && (
                 <p className="small" style={{ margin: '12px 0 0', color: 'var(--gold)' }}>{indicatorInsight(activeSpec, stats)}</p>
               )}
+              <RecentPrints series={active.series} />
             </>
           )}
         </>
       )}
+
+      <ImplicationsStudy short={short} />
 
       <div className="small" style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--hairline)' }}>
         <b>Your record on {short} days:</b>{' '}
