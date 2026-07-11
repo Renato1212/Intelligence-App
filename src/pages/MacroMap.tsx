@@ -16,6 +16,7 @@ import { upcomingEvents } from '../lib/calendar';
 import { loadBreadth, loadCrossAsset, type BreadthRead, type CrossAssetRead, type PairCorr } from '../lib/crossAsset';
 import { analyzeRates, loadRates, ratesInsight, type RatesRead } from '../lib/rates';
 import { loadHeadlines, loadNarrative, THEMES, type Headline, type NarrativeLoad, type ThemeSeries } from '../lib/narrative';
+import { cellFor, loadCommodities, loadWeoBoard, weoRead, type CommodityRow, type WeoBoard } from '../lib/imf';
 import { fmtDateShort, todayISO, weekdayName } from '../lib/format';
 
 const AXIS = { stroke: 'transparent', tick: { fill: '#8a857a', fontSize: 11 }, tickLine: false } as const;
@@ -586,6 +587,130 @@ function BreadthPanel() {
 
 /* --------------------------------- page --------------------------------- */
 
+/* --------------------------- global macro (IMF) --------------------------- */
+
+function GlobalMacroPanel() {
+  const [board, setBoard] = useState<WeoBoard | null>(null);
+  const [weoErr, setWeoErr] = useState<string | null>(null);
+  const [commods, setCommods] = useState<CommodityRow[]>([]);
+  const [pcpsErr, setPcpsErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    void loadWeoBoard().then((r) => {
+      if (!alive) return;
+      setBoard(r.board);
+      setWeoErr(r.error);
+    });
+    void loadCommodities().then((r) => {
+      if (!alive) return;
+      setCommods(r.rows);
+      setPcpsErr(r.error);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const thisYear = new Date().getFullYear();
+  const years = [thisYear - 1, thisYear, thisYear + 1];
+  const read = useMemo(() => (board ? weoRead(board.rows, thisYear) : null), [board, thisYear]);
+
+  const fmtCell = (v: number | null, forecast: boolean) =>
+    v == null ? <span className="muted">—</span> : (
+      <span className="mono" style={{ fontStyle: forecast ? 'italic' : undefined, color: v < 0 ? 'var(--loss)' : undefined }}>
+        {v.toFixed(1)}
+      </span>
+    );
+
+  return (
+    <div className="card">
+      <div className="spread" style={{ alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 6 }}>
+        <div className="card-title" style={{ marginBottom: 0 }}>
+          Global growth &amp; the IMF outlook <span className="hint">World Economic Outlook forecasts + commodity price system — IMF data, keyless, auto-connected</span>
+        </div>
+        {board && (
+          <span className="muted small">
+            source: {board.source === 'imf-datamapper' ? 'IMF DataMapper' : 'IMF via DBnomics mirror'}{board.stale ? ' (cached)' : ''}
+          </span>
+        )}
+      </div>
+
+      {!board ? (
+        <div className="muted small">{weoErr ?? 'Connecting to the IMF…'}</div>
+      ) : (
+        <>
+          {weoErr && <div className="muted small" style={{ marginBottom: 8 }}>{weoErr}</div>}
+          <div style={{ overflowX: 'auto' }}>
+            <table className="data" style={{ minWidth: 560 }}>
+              <thead>
+                <tr>
+                  <th>Economy</th>
+                  {years.map((y) => (
+                    <th key={`g${y}`} style={{ textAlign: 'right' }}>GDP {y}{y >= thisYear ? '*' : ''}</th>
+                  ))}
+                  <th style={{ textAlign: 'right' }}>Infl {thisYear}*</th>
+                  <th style={{ textAlign: 'right' }}>Infl {thisYear + 1}*</th>
+                  <th>Moves</th>
+                </tr>
+              </thead>
+              <tbody>
+                {board.rows.map((r) => (
+                  <tr key={r.economy.code}>
+                    <td style={{ fontWeight: r.economy.code === 'WEOWORLD' ? 700 : 500 }}>{r.economy.label}</td>
+                    {years.map((y) => (
+                      <td key={y} style={{ textAlign: 'right' }}>{fmtCell(cellFor(r.gdp, y), y >= thisYear)}</td>
+                    ))}
+                    <td style={{ textAlign: 'right' }}>{fmtCell(cellFor(r.inflation, thisYear), true)}</td>
+                    <td style={{ textAlign: 'right' }}>{fmtCell(cellFor(r.inflation, thisYear + 1), true)}</td>
+                    <td className="muted small">{r.economy.affects.join(' ')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="muted small" style={{ marginTop: 4 }}>* IMF forecast (italic) — annual %, World Economic Outlook.</div>
+          {read && <p className="small" style={{ margin: '10px 0 0', color: 'var(--gold)' }}>{read}</p>}
+        </>
+      )}
+
+      <div style={{ marginTop: 14, paddingTop: 10, borderTop: '1px solid var(--hairline)' }}>
+        <div className="small muted" style={{ marginBottom: 8 }}>IMF commodity price system — monthly, the demand/supply current under the futures</div>
+        {!commods.length ? (
+          <div className="muted small">{pcpsErr ?? 'Loading commodity indices…'}</div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
+            {commods.map((c) => (
+              <StatTile
+                key={c.spec.id}
+                small
+                label={`${c.spec.label} (${c.spec.affects})`}
+                value={
+                  <span className={c.trend === 'rising' ? 'pos' : c.trend === 'falling' ? 'neg' : ''}>
+                    {c.chg3m != null ? `${c.chg3m > 0 ? '+' : ''}${c.chg3m.toFixed(1)}% 3m` : '—'}
+                  </span>
+                }
+                delta={c.chg12m != null ? `${c.chg12m > 0 ? '+' : ''}${c.chg12m.toFixed(1)}% 12m` : undefined}
+              />
+            ))}
+          </div>
+        )}
+        {pcpsErr && commods.length > 0 && <div className="muted small" style={{ marginTop: 6 }}>{pcpsErr}</div>}
+      </div>
+
+      <Principle domain="Global growth & the commodity cycle">
+        The WEO board is the SLOW current every fast trade swims in. Growth differentials vs the US decide which way
+        the dollar leans for months (a Europe or China that lags the US keeps 6E offered on rallies); world growth near
+        or below ~3% means crude rallies need supply stories because demand won't carry them; and when the IMF has
+        advanced-economy inflation back at target, growth data quietly replaces inflation data as the release that owns
+        the tape. Check this board after each WEO round (April and October) — the REVISIONS, not the levels, are what
+        reprice narratives. The commodity tiles are the monthly reality-check on that story: rising energy with falling
+        copper is a supply squeeze, both rising is a demand cycle — very different crude playbooks.
+      </Principle>
+    </div>
+  );
+}
+
 export default function MacroMap() {
   return (
     <>
@@ -601,6 +726,7 @@ export default function MacroMap() {
       <div className="stack">
         <NarrativePanel />
         <RatesPanel />
+        <GlobalMacroPanel />
         <BreadthPanel />
         <CrossAssetPanel />
       </div>

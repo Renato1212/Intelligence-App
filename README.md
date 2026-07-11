@@ -153,6 +153,16 @@ One page that answers "what regime am I trading in?" before the open:
   divergence, and a 20-day sector-rotation ranking with momentum bars — sortable by momentum or
   distance from the 50DMA — so narrow rallies and defensive rotations are visible before they hit
   the index.
+- **Global growth & the IMF outlook** *(Central Banks / Macro)* — the IMF's World Economic Outlook
+  growth and inflation forecasts for the US, China, Germany, Japan, UK and the world (history plus
+  the IMF's forward projections), auto-connected with no key: the primary source is the IMF
+  DataMapper API, and if that is unreachable from the browser the DBnomics mirror of the same
+  dataset answers instead. A computed read turns the numbers into the slow currents that matter —
+  growth differentials that keep the dollar bid, world growth vs the ~3% stall line for commodity
+  demand, and whether inflation is back at target (so growth data replaces inflation data as the
+  release that owns the tape). Underneath, the **IMF Primary Commodity Price System** monthly
+  indices (energy, crude, gold, copper) with 3- and 12-month changes — the demand/supply context
+  under CL, GC and HG.
 - **The flow calendar** *(Flow Events)* — OPEX, quad witching, futures roll, VIX expiry,
   month/quarter-end rebalancing, auction weeks and new-month inflows, computed from exchange rules
   with zero API — merged into the same calendar as the economic events, so flow days appear in the
