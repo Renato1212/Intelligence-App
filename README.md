@@ -170,23 +170,35 @@ account:
   30D/3M term-structure ratios computed into a **vol regime** (calm carry / nervous / event
   premium / stress-backwardation) and a plain-language read of what that regime means for day
   trading index futures.
-- **SPX dealer gamma & the walls** — the full SPX option chain (per-strike open interest + gamma)
-  turned into a net gamma-exposure profile: **put wall**, **call wall**, the **zero-gamma flip
-  point**, and the current **gamma regime** (positive = dealers dampen moves, pinning; negative =
-  dealers amplify moves, air pockets and trend days). A per-strike GEX chart brackets the session
-  around spot, filterable by **nearest expiry / monthly OPEX / all expiries**.
-- **OPEX concentration** — how much of the open interest sits at the nearest expiry, with the next
-  OPEX date from the flow calendar, so expiry-driven pinning and the post-OPEX "unclenching" are
-  anticipated rather than discovered.
+- **Dealer gamma & the walls, per instrument** — the full option chain (per-strike open interest +
+  gamma) for **SPX → ES, NDX → NQ and RUT → RTY**, turned into a net gamma-exposure profile:
+  **put wall**, **call wall**, the **zero-gamma flip point**, and the current **gamma regime**
+  (positive = dealers dampen moves, pinning; negative = dealers amplify moves, air pockets and
+  trend days). A per-strike GEX chart brackets the session around spot, filterable by **nearest
+  expiry / monthly OPEX / all expiries**.
+- **Key dealer levels ladder** — the actionable levels extracted per instrument (call wall, gamma
+  magnet, zero-gamma flip, acceleration strike, put wall), each with its distance from spot and
+  the expected behavior at it, plus how to map index levels onto the futures chart.
+- **Expiration & flow calendar** — every mechanical date in the next six weeks with the **exact
+  settlement hours and mechanics** (SPX AM-settled monthlies stop trading Thursday 16:00 and
+  settle on Friday's 09:30 SOQ; VIX expiry Wednesdays settle on the 09:30 SPX-option SOQ; PM
+  expiries die at 16:00; auctions at 13:00; rebalancing 15:00–16:00), a day-by-day **OPEX-week
+  playbook** (charm/vanna drift → VIX-expiry reset → the pin → the Monday-after unclenching), and
+  the OPEX open-interest concentration tile.
 - **The session's flow map** — the recurring mechanical windows of every US day (cash open &
   opening drive, the 10:00 data window, lunch/European close, afternoon re-engagement, the 15:50
   MOC imbalance window), each with *why it exists* and *the play*.
 - Every panel carries its collapsible **Principle** — vol term structure, dealer gamma/walls/OPEX
   mechanics, and trading the opens & MOC — so the section teaches the flow domain while you use it.
 
-### Release intelligence — the data behind every catalyst (free, keyless)
+### Release intelligence — the data behind every catalyst (free)
 The Catalysts section doesn't just list NFP and CPI — it shows what each release has actually been
-**printing**, pulled keylessly from DBnomics (the official BLS/ISM data, CORS-open, no account):
+**printing**. The long history comes keylessly from DBnomics (the official BLS/ISM data,
+CORS-open, no account); because that free mirror can stall for months, the app **detects any gap
+against the release schedule and closes it automatically** with the as-released actuals from your
+free market-data key's historical calendar — with the provenance of every segment stated under
+the chart (official history to X · extended with N live prints to Y). Retail Sales and Core PCE,
+which have no free keyless mirror at all, build their history entirely from the live layer:
 
 - **Print history charts** — 4 years of prints per indicator (payrolls change, unemployment, AHE,
   headline & core CPI m/m, core CPI y/y, PPI, JOLTS openings, both ISMs), with the ±1σ band and
@@ -200,6 +212,12 @@ The Catalysts section doesn't just list NFP and CPI — it shows what each relea
   deviation arrow the moment it prints. A countdown chip runs on the next scheduled release.
 - **Filter the week by domain** — one-tap chips cut the week-ahead to economic data, flow events
   (OPEX, auctions, rebalancing), central banks, or tier-1 only.
+- **Recent prints table** — the last six prints with per-print deltas and the source of each row
+  (official vs live calendar), so the record behind the chart is inspectable.
+- **Market implications study** — for every catalyst, the instrument-by-instrument first-move map
+  (ES / NQ / ZN / 6E / GC / CL for a hot vs cold print), *which number inside the release actually
+  moves markets* (core m/m, the control group, prices-paid…), the regime in which the standard
+  mapping inverts, and the principle that survives both.
 - Everything caches locally: history keeps working offline, and each indicator degrades
   independently with an inline note if a source is unreachable.
 - **Honest dates** — releases whose exact date shifts month to month (CPI, PPI, Retail, JOLTS,

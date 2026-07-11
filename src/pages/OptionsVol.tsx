@@ -11,15 +11,18 @@ import {
   YAxis,
 } from 'recharts';
 import { Principle, StatTile } from '../components/ui';
-import { upcomingEvents } from '../lib/calendar';
+import { upcomingEvents, localTime, type CalendarEvent } from '../lib/calendar';
 import {
   gammaProfile,
   gammaRead,
+  keyLevels,
   loadCboeQuote,
   loadChain,
+  OPTION_ROOTS,
   vixRegime,
   type ChainSnapshot,
   type GammaProfile,
+  type KeyLevel,
   type VixRegime,
 } from '../lib/options';
 import { fmtDateShort, todayISO, weekdayName } from '../lib/format';
@@ -147,22 +150,61 @@ function GexChart({ prof }: { prof: GammaProfile }) {
   );
 }
 
+const LEVEL_COLOR: Record<KeyLevel['kind'], string> = {
+  'call-wall': 'var(--profit)',
+  'gamma-peak': 'var(--gold)',
+  flip: '#3987e5',
+  'gamma-trough': 'var(--loss)',
+  'put-wall': 'var(--loss)',
+};
+
+/** The dealer-level ladder: each level with its distance and expected behavior. */
+function KeyLevelsLadder({ prof, future, mapNote }: { prof: GammaProfile; future: string; mapNote: string }) {
+  const levels = keyLevels(prof);
+  if (!levels.length) return null;
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div className="small muted" style={{ marginBottom: 6 }}>
+        Key dealer levels — index points, read them on <b>{future}</b> as zones
+      </div>
+      <div className="stack" style={{ gap: 6 }}>
+        {levels.map((l) => (
+          <div key={`${l.kind}-${l.level}`} className="card" style={{ padding: '8px 12px', borderLeft: `3px solid ${LEVEL_COLOR[l.kind]}` }}>
+            <div className="row" style={{ gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
+              <span className="mono" style={{ fontWeight: 700, fontSize: 15, width: 76 }}>{l.level.toLocaleString()}</span>
+              <b style={{ color: LEVEL_COLOR[l.kind], width: 140 }}>{l.label}</b>
+              <span className={`mono small ${l.distPct >= 0 ? 'pos' : 'neg'}`}>{l.distPct >= 0 ? '+' : ''}{l.distPct.toFixed(1)}% from spot</span>
+            </div>
+            <div className="muted small" style={{ marginTop: 4 }}>{l.behavior}</div>
+          </div>
+        ))}
+      </div>
+      <div className="muted small" style={{ marginTop: 8 }}>{mapNote}</div>
+    </div>
+  );
+}
+
 function GammaPanel() {
-  const [chain, setChain] = useState<ChainSnapshot | null>(null);
+  const [rootSym, setRootSym] = useState(OPTION_ROOTS[0].root);
+  const [chains, setChains] = useState<Record<string, ChainSnapshot | null>>({});
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [sel, setSel] = useState<'nearest' | 'monthly' | 'all'>('nearest');
 
-  const refresh = async (force: boolean) => {
+  const rootInfo = OPTION_ROOTS.find((r) => r.root === rootSym) ?? OPTION_ROOTS[0];
+  const chain = chains[rootSym] ?? null;
+
+  const refresh = async (force: boolean, sym = rootSym) => {
     setLoading(true);
-    const res = await loadChain('_SPX', force);
-    setChain(res.chain);
+    const res = await loadChain(sym, force);
+    setChains((m) => ({ ...m, [sym]: res.chain }));
     setError(res.error);
     setLoading(false);
   };
   useEffect(() => {
-    void refresh(false);
-  }, []);
+    if (!chains[rootSym]) void refresh(false, rootSym);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rootSym]);
 
   const prof = useMemo(() => {
     if (!chain) return null;
@@ -183,9 +225,15 @@ function GammaPanel() {
     <div className="card">
       <div className="spread" style={{ alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 6 }}>
         <div className="card-title" style={{ marginBottom: 0 }}>
-          SPX dealer gamma &amp; the walls <span className="hint">per-strike open interest and net gamma exposure — the mechanics behind pinning and air pockets</span>
+          Dealer gamma &amp; the walls <span className="hint">per-strike open interest and net gamma exposure — the mechanics behind pinning and air pockets</span>
         </div>
-        <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+        <div className="row" style={{ gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          {OPTION_ROOTS.map((r) => (
+            <span key={r.root} className={`chip clickable ${rootSym === r.root ? 'selected' : ''}`} onClick={() => setRootSym(r.root)}>
+              {r.label} ({r.future})
+            </span>
+          ))}
+          <span style={{ width: 10 }} />
           {(['nearest', 'monthly', 'all'] as const).map((s) => (
             <span key={s} className={`chip clickable ${sel === s ? 'selected' : ''}`} onClick={() => setSel(s)}>
               {s === 'nearest' ? 'Nearest expiry' : s === 'monthly' ? 'Monthly OPEX' : 'All expiries'}
@@ -200,9 +248,9 @@ function GammaPanel() {
       {!prof ? (
         <div className="muted small">
           {error ? (
-            <><b>Chain unavailable:</b> {error} The first load pulls the full SPX chain from CBOE's free CDN (heavy — a few MB); it is cached for 15 minutes after that.</>
+            <><b>Chain unavailable:</b> {error} The first load pulls the full {rootInfo.label} chain from CBOE's free CDN (heavy — a few MB); it is cached for 15 minutes after that.</>
           ) : (
-            'Pulling the SPX option chain (first load is a few MB — then cached)…'
+            `Pulling the ${rootInfo.label} option chain (first load is a few MB — then cached)…`
           )}
         </div>
       ) : (
@@ -234,6 +282,7 @@ function GammaPanel() {
             </span>
           </div>
           <p className="small" style={{ margin: '12px 0 0', color: 'var(--gold)' }}>{gammaRead(prof)}</p>
+          <KeyLevelsLadder prof={prof} future={rootInfo.future} mapNote={rootInfo.mapNote} />
         </>
       )}
 
@@ -246,6 +295,107 @@ function GammaPanel() {
         forces peak — then the hedges expire, the pin releases, and the session after expiration often makes the clean
         directional move. Trade the mechanics: respect walls as first targets, expect chop above the flip and speed
         below it, and never expect a trend day inside a heavy positive-gamma pin.
+      </Principle>
+    </div>
+  );
+}
+
+/* ----------------------- expiration & flow calendar ---------------------- */
+
+/** Settlement mechanics per flow-event type — the exact hours and what settles. */
+const EXPIRY_MECHANICS: Record<string, string> = {
+  OPEX:
+    'Two settlements, two hours: SPX traditional (AM-settled) stops trading Thursday 16:00 ET and settles on Friday\'s 09:30 SOQ (opening prints of every SPX component); SPXW weeklies, equity and ETF options trade to Friday 16:00 ET (PM-settled). The pin is strongest into each settlement hour, and the hedges backing it die WITH the settlement — Friday afternoon trades on a lighter book than Friday morning.',
+  'Quad Witching':
+    'Index futures and AM index options settle on the Friday 09:30 ET SOQ — the opening auction is the volume event of the quarter. Equity/ETF options follow at 16:00 ET, and the 15:50 MOC carries the index-rebalance flow. Between the two windows, huge printed volume is mostly plumbing.',
+  'VIX Expiry':
+    'Wednesday morning, 30 days before the next monthly OPEX. Settlement (VRO) comes from the 09:30 ET opening auction of SPX options — a window that can be pushed by big SOQ orders. Vol positions reset here mid-week: the tape\'s character often changes from Wednesday 09:30 onward.',
+  'Futures Roll':
+    'Liquidity migrates to the next quarterly contract over roughly a week (calendar-spread volume peaks around 10:00–14:00 ET). Confirm you are quoting the new front month; DOM depth and footprint reads are distorted by spread legs all week.',
+  'Month-End':
+    'The rebalance window is 15:00–16:00 ET: equity MOC imbalances publish 15:50, bond index extensions buy duration into the 15:00 futures settle and the 16:00 bell.',
+  'Quarter-End':
+    'Same 15:00–16:00 ET window as month-end but with quarterly mandates stacked on top. Estimates circulate all week — the flow is often front-run days early, so the "obvious" close-day trade frequently disappoints.',
+  'UST Auction':
+    'Bids due 13:00 ET, results ~13:02. The tail (vs when-issued) and bid-to-cover hit ZN/ZB instantly; a weak 30-year is the one that spills into equities within minutes.',
+  'New-Month Flow':
+    'Fresh 401(k)/target-date inflows get put to work from the 09:30 open — the buy-side tilt is strongest in the first 60–90 minutes.',
+};
+
+/** Day-by-day mechanics of an OPEX week — what each session tends to do. */
+const OPEX_WEEK: { day: string; read: string }[] = [
+  { day: 'Mon–Tue', read: 'Charm & vanna decay: as expiry nears, dealer hedges on in-the-money-ish options bleed off, producing a slow supportive drift in quiet tape. Trend-following into strength works better than fading it.' },
+  { day: 'Wednesday', read: 'VIX expiry (when it lands this week) resets vol hedges at the 09:30 SOQ — watch for the tape to change character from mid-morning. A post-expiry vol crush often fuels an index grind.' },
+  { day: 'Thursday', read: 'Last trading day for AM-settled SPX monthlies (16:00 ET). Pinning to the big strikes tightens; range compression into the close is the norm, not a setup.' },
+  { day: 'Friday (OPEX)', read: '09:30 SOQ prints the AM settlement — the volume burst is mechanical. Expect magnetism to round-number strikes most of the day, gamma rolling off into 16:00, and late-session drift as the pin releases.' },
+  { day: 'Monday after', read: 'The unclenching: the expired hedges are gone, dealer gamma is at its lightest, and the market is freest to MOVE. The cleanest trend days of the month cluster here — size the breakout playbook up, the fade playbook down.' },
+];
+
+function ExpiryCalendarPanel() {
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [showWeek, setShowWeek] = useState(false);
+  const events = useMemo(
+    () => upcomingEvents(todayISO(), 45).filter((e: CalendarEvent) => e.domain === 'flow'),
+    [],
+  );
+  return (
+    <div className="card">
+      <div className="card-title">
+        Expiration &amp; flow calendar <span className="hint">every mechanical date in the next 6 weeks — with the exact settlement hours</span>
+      </div>
+      <div className="stack" style={{ gap: 6 }}>
+        {events.map((e) => {
+          const mech = EXPIRY_MECHANICS[e.short];
+          const open = openId === e.id;
+          return (
+            <div
+              key={e.id}
+              className="card"
+              style={{ padding: '10px 12px', cursor: 'pointer', borderLeft: `3px solid ${open ? 'var(--gold)' : 'var(--hairline)'}` }}
+              onClick={() => setOpenId(open ? null : e.id)}
+            >
+              <div className="row" style={{ gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                <span className="mono" style={{ fontWeight: 700, width: 86 }}>{weekdayName(e.date).slice(0, 3)} {e.date.slice(5)}</span>
+                <span className="mono muted small" style={{ width: 110 }}>{e.timeET} ET · {localTime(e.instant)} local</span>
+                <b>{e.short}</b>
+                <span className="muted small" style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.name}</span>
+                {e.approx && <span className="chip" style={{ fontSize: 10, padding: '0 5px', color: 'var(--muted)' }}>est.</span>}
+              </div>
+              {open && (
+                <div className="small" style={{ marginTop: 8, display: 'grid', gap: 4 }}>
+                  {mech && <div><b style={{ color: 'var(--gold)' }}>Mechanics &amp; hours:</b> <span className="muted">{mech}</span></div>}
+                  <div><b style={{ color: 'var(--gold)' }}>Why it matters:</b> <span className="muted">{e.why}</span></div>
+                  <div><b style={{ color: 'var(--gold)' }}>Play:</b> <span className="muted">{e.playbook}</span></div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {!events.length && <div className="muted small">No flow events computed for the next 6 weeks — unexpected; check the calendar module.</div>}
+      </div>
+
+      <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--hairline)' }}>
+        <div className="spread" style={{ alignItems: 'center', cursor: 'pointer' }} onClick={() => setShowWeek((s) => !s)}>
+          <b className="small" style={{ color: 'var(--gold)' }}>{showWeek ? '▾' : '▸'} How to trade OPEX week — day by day</b>
+        </div>
+        {showWeek && (
+          <div className="stack" style={{ gap: 6, marginTop: 8 }}>
+            {OPEX_WEEK.map((d) => (
+              <div key={d.day} className="row" style={{ gap: 10, alignItems: 'baseline' }}>
+                <span className="mono small" style={{ fontWeight: 700, width: 104, flexShrink: 0 }}>{d.day}</span>
+                <span className="muted small">{d.read}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <Principle domain="Flow — trading expiration dates">
+        Expiration edges are TIME-STAMPED: the pin exists only while the hedges behind it are alive, and each settlement
+        hour (Thu 16:00, Fri 09:30, Fri 16:00, VIX Wednesday 09:30) kills a layer of them. That is why the same chart
+        pattern fails on OPEX Friday morning and works on the Monday after. Before an expiration day, note three things
+        from this page: WHERE the pin is (gamma magnet / walls), HOW MUCH dies at this expiry (OI share tile above),
+        and WHICH settlement hours apply — then expect compression before each hour and freedom after the last one.
       </Principle>
     </div>
   );
@@ -341,6 +491,7 @@ export default function OptionsVol() {
       <div className="stack">
         <VixPanel />
         <GammaPanel />
+        <ExpiryCalendarPanel />
         <SessionFlowPanel />
       </div>
     </>

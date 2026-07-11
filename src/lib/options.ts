@@ -35,6 +35,30 @@ export interface CboeQuote {
   changePct: number | null;
 }
 
+/** The index chains CBOE serves keylessly, mapped to the futures they drive. */
+export interface OptionRoot {
+  root: string;
+  label: string;
+  future: string;
+  /** how index levels translate to the future's chart */
+  mapNote: string;
+}
+
+export const OPTION_ROOTS: OptionRoot[] = [
+  {
+    root: '_SPX', label: 'S&P 500', future: 'ES',
+    mapNote: 'SPX cash level ≈ ES minus the basis (a few points, sign varies with rates/dividends). Treat each level as a ZONE a few ES points wide, not a tick.',
+  },
+  {
+    root: '_NDX', label: 'Nasdaq 100', future: 'NQ',
+    mapNote: 'NDX cash level ≈ NQ minus the basis. NDX strikes are 25–100 points apart — zones are proportionally wider than on ES.',
+  },
+  {
+    root: '_RUT', label: 'Russell 2000', future: 'RTY',
+    mapNote: 'RUT cash level ≈ RTY minus the basis. Russell OI is thinner — walls carry less force than SPX walls; confirm with price action.',
+  },
+];
+
 export interface OptionEntry {
   /** YYYY-MM-DD */
   expiry: string;
@@ -232,6 +256,63 @@ export function gammaRead(p: GammaProfile): string {
   return parts.join('. ') + '.';
 }
 
+/* ------------------------------ key levels ------------------------------- */
+
+export interface KeyLevel {
+  level: number;
+  kind: 'call-wall' | 'gamma-peak' | 'flip' | 'put-wall' | 'gamma-trough';
+  label: string;
+  /** distance from spot, % (positive = above) */
+  distPct: number;
+  behavior: string;
+}
+
+/**
+ * The dealer-level ladder for one gamma profile, sorted top-down like a
+ * price ladder. Pure — testable with fixture profiles.
+ */
+export function keyLevels(p: GammaProfile): KeyLevel[] {
+  const out: KeyLevel[] = [];
+  const dist = (lvl: number) => ((lvl - p.spot) / p.spot) * 100;
+  const push = (level: number | null, kind: KeyLevel['kind'], label: string, behavior: string) => {
+    if (level == null) return;
+    if (out.some((l) => l.level === level)) return; // walls and peaks often coincide
+    out.push({ level, kind, label, distPct: dist(level), behavior });
+  };
+
+  push(
+    p.callWall, 'call-wall', 'Call wall',
+    'Heaviest call OI. Dealer hedging supplies stock into rallies here — grind-ups stall, breakouts need real flow behind them. First upside target in positive gamma; take-profit zone, not a chase zone.',
+  );
+  push(
+    p.putWall, 'put-wall', 'Put wall',
+    'Heaviest put OI — where crash protection is thickest. Dealer hedging buys into weakness approaching it: mechanical support and the classic downside target. A clean break of the put wall means hedges roll DOWN — air below.',
+  );
+  push(
+    p.zeroGamma, 'flip', 'Zero-gamma flip',
+    'The regime line. Above it dealer hedging dampens moves (fade extremes, expect pinning); below it hedging amplifies them (trend days, air pockets, respect momentum). A cross often changes the day\'s character mid-session.',
+  );
+
+  // biggest positive / negative net-GEX strikes near spot that aren't already listed
+  const near = p.rows.filter((r) => Math.abs(r.strike - p.spot) / p.spot <= 0.06);
+  const peak = near.reduce((b, r) => (r.gex > (b?.gex ?? 0) ? r : b), null as StrikeRow | null);
+  const trough = near.reduce((b, r) => (r.gex < (b?.gex ?? 0) ? r : b), null as StrikeRow | null);
+  if (peak && peak.gex > 0) {
+    push(
+      peak.strike, 'gamma-peak', 'Gamma magnet',
+      'Largest positive net gamma near spot — the strongest pin candidate. Late on quiet and expiry days, price gets pulled here; ranges compress around it.',
+    );
+  }
+  if (trough && trough.gex < 0) {
+    push(
+      trough.strike, 'gamma-trough', 'Acceleration strike',
+      'Largest negative net gamma near spot — hedging flips to chasing through here. Moves SPEED UP across this strike; stops resting just beyond it get run.',
+    );
+  }
+
+  return out.sort((a, b) => b.level - a.level);
+}
+
 export interface VixRegime {
   vix: number;
   vix9d: number | null;
@@ -271,7 +352,7 @@ const CDN = 'https://cdn.cboe.com/api/global/delayed_quotes';
 const QUOTE_TTL = 60 * 1000; // delayed feed; refresh read every minute
 const CHAIN_TTL = 15 * 60 * 1000; // chains are heavy — 15-minute cache
 const QUOTE_KEY = 'ei-cboe-quotes-v1';
-const CHAIN_KEY = 'ei-cboe-chain-v1';
+const CHAIN_KEY = 'ei-cboe-chain-v2'; // v2: per-root entries
 
 interface QuoteCache {
   [symbol: string]: { at: number; quote: CboeQuote };
@@ -309,9 +390,10 @@ export async function loadCboeQuote(symbol: string): Promise<{ quote: CboeQuote 
  * demand.
  */
 export async function loadChain(root = '_SPX', force = false): Promise<{ chain: ChainSnapshot | null; error: string | null }> {
+  const key = `${CHAIN_KEY}:${root}`;
   let cached: ChainSnapshot | null = null;
   try {
-    const raw = JSON.parse(localStorage.getItem(CHAIN_KEY) ?? 'null') as ChainSnapshot | null;
+    const raw = JSON.parse(localStorage.getItem(key) ?? 'null') as ChainSnapshot | null;
     if (raw && raw.root === root && Array.isArray(raw.entries)) cached = raw;
   } catch {
     cached = null;
@@ -330,7 +412,7 @@ export async function loadChain(root = '_SPX', force = false): Promise<{ chain: 
       entries: chain.entries.filter((e) => Math.abs(e.strike - chain.spot) / chain.spot <= 0.25),
     };
     try {
-      localStorage.setItem(CHAIN_KEY, JSON.stringify(slim));
+      localStorage.setItem(key, JSON.stringify(slim));
     } catch {
       // chain may exceed quota — serve it uncached
     }

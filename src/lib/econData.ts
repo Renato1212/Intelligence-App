@@ -16,6 +16,9 @@
  * unit-testable without the network.
  */
 
+import { getMarketApiKey } from './market';
+import { fetchRecentPrints, mergePrints, staleGapMonths } from './econLive';
+
 export type Transform = 'diff' | 'pct1' | 'pct12' | 'level';
 
 export interface IndicatorSpec {
@@ -87,6 +90,20 @@ export const INDICATORS: IndicatorSpec[] = [
       { provider: 'ISM', dataset: 'nm-pmi', series: 'nm-pmi' },
     ],
   },
+  // live-only series: no free keyless mirror exists, but the market-data key's
+  // historical calendar actuals reconstruct the recent print history
+  {
+    id: 'retail-mm', eventShort: 'Retail Sales', label: 'Retail sales', unit: '% m/m', transform: 'level', decimals: 1,
+    sources: [],
+  },
+  {
+    id: 'pce-core-mm', eventShort: 'PCE', label: 'Core PCE', unit: '% m/m', transform: 'level', decimals: 2,
+    sources: [],
+  },
+  {
+    id: 'pce-core-yoy', eventShort: 'PCE', label: 'Core PCE YoY', unit: '% y/y', transform: 'level', decimals: 1,
+    sources: [],
+  },
 ];
 
 export const INDICATORS_BY_EVENT = new Map<string, IndicatorSpec[]>();
@@ -98,8 +115,6 @@ for (const ind of INDICATORS) {
 /** Events with scheduled releases but no free keyless history source. */
 export const NO_HISTORY_NOTE: Record<string, string> = {
   'Jobless Claims': 'Weekly claims history has no free keyless API; live consensus/actual still appears when a market-data key is connected.',
-  PCE: 'BEA PCE history has no stable free keyless API; live consensus/actual still appears when a market-data key is connected.',
-  'Retail Sales': 'Census retail history has no stable free keyless API; live consensus/actual still appears when a market-data key is connected.',
   FOMC: 'Rate decisions are discrete policy events — see the Playbook and Market Intel positioning instead of a print chart.',
   'FOMC Minutes': 'Minutes are qualitative — no data series. Prepare with the statement, positioning and your event-day record.',
 };
@@ -115,6 +130,10 @@ export interface IndicatorSeries {
   points: PrintPoint[]; // ascending, transformed
   fetchedAt: string;
   stale?: boolean;
+  /** last period covered by the OFFICIAL source (null = live-only series) */
+  officialThrough?: string | null;
+  /** points appended from the live calendar layer beyond the official history */
+  liveCount?: number;
 }
 
 /* ------------------------------ transforms ------------------------------ */
@@ -247,11 +266,11 @@ export function indicatorInsight(spec: IndicatorSpec, stats: PrintStats): string
 /* ------------------------------- fetching ------------------------------- */
 
 const API = 'https://api.db.nomics.world/v22/series';
-const CACHE_KEY = 'ei-econ-cache-v2'; // v2: JOLTS scaled to millions
+const CACHE_KEY = 'ei-econ-cache-v3'; // v3: live extension + provenance
 const FRESH_MS = 20 * 3600 * 1000;
 
 interface CacheShape {
-  [indicatorId: string]: { fetchedAt: string; points: PrintPoint[] };
+  [indicatorId: string]: { fetchedAt: string; points: PrintPoint[]; officialThrough?: string | null; liveCount?: number };
 }
 
 function readCache(): CacheShape {
@@ -319,24 +338,199 @@ export interface IndicatorLoad {
   error: string | null;
 }
 
-/** Cached-first load of one indicator's transformed print history. */
+/**
+ * Cached-first load of one indicator's transformed print history.
+ *
+ * The official mirror provides the long backbone; whenever its tail is behind
+ * the newest expected print (the mirror can stall for months), the live
+ * calendar layer (trader's market-data key) reconstructs the missing recent
+ * prints and splices them on — with provenance kept explicit.
+ */
 export async function loadIndicator(spec: IndicatorSpec, force = false): Promise<IndicatorLoad> {
   const cache = readCache();
   const hit = cache[spec.id];
   if (!force && hit && Date.now() - new Date(hit.fetchedAt).getTime() < FRESH_MS && hit.points.length >= 4) {
-    return { series: { spec, points: hit.points, fetchedAt: hit.fetchedAt }, error: null };
+    return {
+      series: { spec, points: hit.points, fetchedAt: hit.fetchedAt, officialThrough: hit.officialThrough ?? null, liveCount: hit.liveCount ?? 0 },
+      error: null,
+    };
   }
-  try {
-    const points = await fetchIndicator(spec);
-    const fetchedAt = new Date().toISOString();
-    cache[spec.id] = { fetchedAt, points };
-    writeCache(cache);
-    return { series: { spec, points, fetchedAt }, error: null };
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : 'Fetch failed.';
-    if (hit && hit.points.length >= 4) {
-      return { series: { spec, points: hit.points, fetchedAt: hit.fetchedAt, stale: true }, error: msg };
+
+  let official: PrintPoint[] = [];
+  let officialErr: string | null = null;
+  if (spec.sources.length) {
+    try {
+      official = await fetchIndicator(spec);
+    } catch (e) {
+      officialErr = e instanceof Error ? e.message : 'Fetch failed.';
     }
-    return { series: null, error: msg };
   }
+
+  let points = official;
+  const officialThrough = official.length ? official[official.length - 1].period : null;
+  let liveCount = 0;
+  const gap = staleGapMonths(officialThrough);
+  if (gap >= 1 && getMarketApiKey()) {
+    try {
+      const recent = await fetchRecentPrints(spec, gap);
+      const merged = mergePrints(official, recent);
+      points = merged.points;
+      liveCount = merged.liveCount;
+    } catch {
+      // the live layer is best-effort — official history still renders
+    }
+  }
+
+  if (points.length >= 4) {
+    const fetchedAt = new Date().toISOString();
+    cache[spec.id] = { fetchedAt, points, officialThrough, liveCount };
+    writeCache(cache);
+    return { series: { spec, points, fetchedAt, officialThrough, liveCount }, error: officialErr };
+  }
+
+  const msg =
+    officialErr ??
+    (spec.sources.length
+      ? 'No data source responded.'
+      : 'This series has no free keyless mirror — connect the free FMP key (Trading Day → Preparation) and its recent prints load from the live calendar.');
+  if (hit && hit.points.length >= 4) {
+    return {
+      series: { spec, points: hit.points, fetchedAt: hit.fetchedAt, stale: true, officialThrough: hit.officialThrough ?? null, liveCount: hit.liveCount ?? 0 },
+      error: msg,
+    };
+  }
+  return { series: null, error: msg };
 }
+
+/* --------------------- the print study: implications --------------------- */
+
+/**
+ * How each release maps onto the instruments a futures day trader runs —
+ * the FIRST-move mechanics for a hot (above-consensus) or cold print, the
+ * regime in which that mapping inverts, and the principle that survives both.
+ * Arrows are the typical knee-jerk, not a promise: the reaction to the
+ * reaction is the tradeable information.
+ */
+export interface PrintPlaybook {
+  /** the number inside the release that actually moves markets */
+  driver: string;
+  hot: Record<string, string>;
+  cold: Record<string, string>;
+  hotNote: string;
+  coldNote: string;
+  /** when the standard mapping flips */
+  regimeFlip: string | null;
+  principle: string;
+}
+
+export const PLAYBOOK_INSTRUMENTS = ['ES', 'NQ', 'ZN', '6E', 'GC', 'CL'] as const;
+
+export const PRINT_PLAYBOOK: Record<string, PrintPlaybook> = {
+  NFP: {
+    driver: 'Payrolls vs consensus first, then the unemployment rate and AHE m/m — a beat with soft wages reads very differently from a beat with hot wages.',
+    hot: { ES: '↓', NQ: '↓', ZN: '↓↓', '6E': '↓', GC: '↓', CL: '↑' },
+    cold: { ES: '↑', NQ: '↑', ZN: '↑↑', '6E': '↑', GC: '↑', CL: '↓' },
+    hotNote: 'Strong jobs → fewer cuts priced → yields up, dollar up. Rates feel it hardest; equities follow the rates move.',
+    coldNote: 'Weak jobs → cuts repriced in → bonds rally, dollar softens, gold bid.',
+    regimeFlip:
+      'In a GROWTH-SCARE regime the equity legs invert: weak payrolls stop being "more cuts = buy stocks" and become "recession = sell stocks". Decide before 8:30 which regime you are in — the bond leg is the reliable one, the equity leg is regime-dependent.',
+    principle:
+      'Trade the SECOND move. The 8:30 spike is algorithmic and often wrong-footed by revisions and AHE; the 9:30 cash open shows you which interpretation real money bought.',
+  },
+  CPI: {
+    driver: 'CORE m/m to two decimals is the market mover — 0.2 vs 0.3 repricess the whole cut path. Headline mostly matters through energy.',
+    hot: { ES: '↓', NQ: '↓↓', ZN: '↓↓', '6E': '↓', GC: '↓', CL: '≈' },
+    cold: { ES: '↑', NQ: '↑↑', ZN: '↑↑', '6E': '↑', GC: '↑', CL: '≈' },
+    hotNote: 'Hot core → real yields jump → long-duration assets (NQ, gold) get hit hardest; dollar bid.',
+    coldNote: 'Cool core → cut odds up → duration rips; NQ outperforms ES; gold and euro bid.',
+    regimeFlip:
+      'When inflation is already back at target, a hot print is a one-day wobble, not a regime change — the fade gets faster each month the trend holds.',
+    principle:
+      'CPI days are gap-and-extend OR gap-and-fade days, decided in the first 30 minutes by whether 10-year yields HOLD their move. Watch ZN, not ES, for the truth.',
+  },
+  PPI: {
+    driver: 'The components that feed PCE (portfolio management, airfares, healthcare) — economists rebuild their PCE forecast from them the same morning.',
+    hot: { ES: '↓', NQ: '↓', ZN: '↓', '6E': '↓', GC: '↓', CL: '≈' },
+    cold: { ES: '↑', NQ: '↑', ZN: '↑', '6E': '↑', GC: '↑', CL: '≈' },
+    hotNote: 'Same direction as CPI but usually half the magnitude — unless it CONTRADICTS yesterday’s CPI.',
+    coldNote: 'A soft PPI right after a soft CPI compounds the disinflation trade instead of repeating it.',
+    regimeFlip: null,
+    principle:
+      'PPI is a revision to the CPI trade, not a new event. If CPI already moved the market, PPI confirms or unwinds that move via the PCE-relevant components.',
+  },
+  JOLTS: {
+    driver: 'Openings level vs consensus, plus the quits rate — quits are the wage-pressure signal the Fed actually quotes.',
+    hot: { ES: '↓', NQ: '↓', ZN: '↓', '6E': '↓', GC: '↓', CL: '≈' },
+    cold: { ES: '↑', NQ: '↑', ZN: '↑', '6E': '↑', GC: '↑', CL: '≈' },
+    hotNote: 'More openings → labor still tight → yields up. A 10:00 release: it hits an open, thin book.',
+    coldNote: 'Falling openings → labor cooling without layoffs → the soft-landing print; bonds and equities can rally TOGETHER.',
+    regimeFlip:
+      'Once claims start rising, a JOLTS miss stops being good news for equities — cooling becomes cracking.',
+    principle:
+      'JOLTS lands at 10:00 into the first reversal window — its move often sets the 10:00–11:30 leg. Lagging data (it is two months old): fade extremes when fresher data disagrees.',
+  },
+  'ISM Mfg': {
+    driver: 'Headline above/below 50, then PRICES PAID (inflation read) and NEW ORDERS (leading demand).',
+    hot: { ES: '↑', NQ: '↑', ZN: '↓', '6E': '↓', GC: '↓', CL: '↑' },
+    cold: { ES: '↓', NQ: '↓', ZN: '↑', '6E': '↑', GC: '↑', CL: '↓' },
+    hotNote: 'Growth beat → cyclicals and crude bid, bonds offered. Manufacturing is small but early.',
+    coldNote: 'Sub-50 with weak new orders → growth-scare tape; bonds catch the bid.',
+    regimeFlip:
+      'When inflation is the fear, a HOT prices-paid subindex can turn a headline beat into an equity-negative print.',
+    principle:
+      'The subindices carry the tradeable surprise. A 10:00 release into an open book — expect the reaction to interact with the opening drive, and mark whether it confirms or fights it.',
+  },
+  'ISM Svcs': {
+    driver: 'Headline vs 50 — services is ~80% of the economy, so this one outranks manufacturing. Prices paid = services inflation.',
+    hot: { ES: '↑', NQ: '↑', ZN: '↓', '6E': '↓', GC: '↓', CL: '↑' },
+    cold: { ES: '↓', NQ: '↓', ZN: '↑', '6E': '↑', GC: '↑', CL: '↓' },
+    hotNote: 'Services running hot keeps the "no landing" narrative alive — yields up, but equities often absorb it.',
+    coldNote: 'A services crack is the recession signal the market respects most — risk-off across the board.',
+    regimeFlip:
+      'In an inflation-fighting regime, hot services = sticky services inflation = equities DOWN with bonds. Same print, opposite equity sign.',
+    principle:
+      'Ask which fear owns the market this month — growth or inflation — and read the print through that lens. The bond leg tells you which lens the market chose.',
+  },
+  'Jobless Claims': {
+    driver: 'The 4-week average and continuing claims trend — a single weekly print is noise until it breaks the range.',
+    hot: { ES: '↓', NQ: '↓', ZN: '↑', '6E': '↑', GC: '↑', CL: '↓' },
+    cold: { ES: '↑', NQ: '↑', ZN: '↓', '6E': '↓', GC: '↓', CL: '↑' },
+    hotNote: 'Hot = MORE claims = labor cracking → bonds bid, equities offered (growth scare).',
+    coldNote: 'Low claims = labor fine → the no-landing tape; yields drift up.',
+    regimeFlip:
+      'In a cutting cycle driven by disinflation (not recession), rising claims can be equity-POSITIVE for a while — more cuts, no crack yet. That window closes fast.',
+    principle:
+      'Claims are a Thursday 8:30 metronome. They rarely make the day alone, but a claims surprise the week before NFP repositions the whole street for it.',
+  },
+  'Retail Sales': {
+    driver: 'The CONTROL GROUP (ex-autos, gas, building materials, food services) — it feeds GDP directly and strips the noise.',
+    hot: { ES: '↑', NQ: '↑', ZN: '↓', '6E': '↓', GC: '↓', CL: '↑' },
+    cold: { ES: '↓', NQ: '↓', ZN: '↑', '6E': '↑', GC: '↑', CL: '↓' },
+    hotNote: 'Consumer spending = the US economy’s engine. A control-group beat lifts growth trades and yields together.',
+    coldNote: 'A soft control group after soft jobs data compounds into the growth-scare trade.',
+    regimeFlip:
+      'When the market fears inflation more than recession, a hot consumer = hawkish = equities give back the pop.',
+    principle:
+      'Headline retail sales lie (autos and gas distort them). Read the control group before reacting — the first algo move is off the headline and often reverses on the detail.',
+  },
+  PCE: {
+    driver: 'Core PCE m/m — the Fed’s actual target variable. Annualize the 3-month run rate and compare to 2%.',
+    hot: { ES: '↓', NQ: '↓', ZN: '↓', '6E': '↓', GC: '↓', CL: '≈' },
+    cold: { ES: '↑', NQ: '↑', ZN: '↑', '6E': '↑', GC: '↑', CL: '≈' },
+    hotNote: 'Hot core PCE = the target itself is misbehaving — hawkish repricing with no interpretation needed.',
+    coldNote: 'On-target PCE confirms the cut path; usually a small move because CPI/PPI already told the street.',
+    regimeFlip: null,
+    principle:
+      'PCE is usually PRE-TRADED: CPI and PPI components let economists nail the forecast, so the surprise is small. A big PCE surprise means the components models missed — respect that move, it is real information.',
+  },
+  FOMC: {
+    driver: 'The statement’s guidance language and the dot plot (quarterly) at 14:00; Powell’s presser tone at 14:30.',
+    hot: { ES: '↓', NQ: '↓↓', ZN: '↓↓', '6E': '↓', GC: '↓', CL: '≈' },
+    cold: { ES: '↑', NQ: '↑↑', ZN: '↑↑', '6E': '↑', GC: '↑', CL: '≈' },
+    hotNote: 'Hawkish surprise (fewer cuts, higher dots) → duration sells, dollar bid, NQ underperforms.',
+    coldNote: 'Dovish surprise → everything with duration rips; gold and euro squeeze.',
+    regimeFlip: null,
+    principle:
+      'The 14:00–14:30 statement move is HALF the event. The presser regularly reverses it — the classic pattern is statement-spike, presser-unwind, and the 15:00–16:00 leg is the day’s true direction. Never judge an FOMC day before Powell finishes.',
+  },
+};
