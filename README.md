@@ -197,6 +197,14 @@ account:
   (positive = dealers dampen moves, pinning; negative = dealers amplify moves, air pockets and
   trend days). A per-strike GEX chart brackets the session around spot, filterable by **nearest
   expiry / monthly OPEX / all expiries**.
+- **Expected-move rails** — the options market's own priced range from ATM implied vol: the 1σ
+  daily move (±points and %), today's 68% range, and the move out to the nearest expiry, drawn as a
+  spot-centered band. These are the intraday rails — ~68% of sessions finish inside the daily band,
+  the edges are where the fade-vs-breakout decision lives, and the gamma regime tells you which way
+  to lean (band holds in positive gamma, breaks in negative).
+- **Cumulative gamma-flip profile** — the SpotGamma-style curve: cumulative dealer gamma across
+  strikes, crossing zero at the flip, so you can see where hedging turns from stabilizing to
+  destabilizing.
 - **Key dealer levels ladder** — the actionable levels extracted per instrument (call wall, gamma
   magnet, zero-gamma flip, acceleration strike, put wall), each with its distance from spot and
   the expected behavior at it, plus how to map index levels onto the futures chart.
