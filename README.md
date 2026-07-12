@@ -220,8 +220,16 @@ The Catalysts section doesn't just list NFP and CPI — it shows what each relea
   Bureau of Labor Statistics' own API through a tiny serverless proxy that ships with the app
   (`/api/bls`). The BLS API doesn't allow direct browser calls (no CORS), so the proxy fetches it
   server-side on your own deployment and hands the app **current, official prints** — you don't
-  enter a key or configure anything. (Optionally set a `BLS_API_KEY` env var on your deployment for
-  higher rate limits; it works keyless without one.)
+  enter a key or configure anything. Keyless it uses BLS v1 (GET per series, the current ~3 years),
+  which the app merges onto the deep DBnomics history so the chart keeps its full range *and* a
+  current last print; set an optional free `BLS_API_KEY` env var and it upgrades to v2 (10 years in
+  one call, higher limits). Responses are edge-cached 24h.
+- **The full subcomponent breakdown** — for CPI, an expandable "full basket" table shows the real
+  index level, month-over-month, year-over-year and 3-month-annualized run-rate for the headline,
+  core, and every major subcomponent (shelter, core services / "supercore", core goods, food,
+  energy) side by side — with basket weights and a computed **cross-read** that tells you what the
+  split *means* (is disinflation coming from goods or services? is shelter still the sticky
+  driver?). It's the release breakdown economic-calendar sites don't give you.
 - **Resilient fallbacks** — if the proxy is unavailable (e.g. running the dev server locally), the
   app falls back to the DBnomics mirror of the same official data, and then — if you've connected a
   free market-data key — to the as-released actuals from its historical calendar. The provenance of

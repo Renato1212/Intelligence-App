@@ -266,7 +266,7 @@ export function indicatorInsight(spec: IndicatorSpec, stats: PrintStats): string
 /* ------------------------------- fetching ------------------------------- */
 
 const API = 'https://api.db.nomics.world/v22/series';
-const CACHE_KEY = 'ei-econ-cache-v3'; // v3: live extension + provenance
+const CACHE_KEY = 'ei-econ-cache-v4'; // v4: BLS-proxy tail merged onto mirror history
 const FRESH_MS = 20 * 3600 * 1000;
 
 interface CacheShape {
@@ -351,40 +351,52 @@ async function fetchBlsProxy(series: string): Promise<PrintPoint[] | null> {
   return raw.length >= 8 ? raw : null;
 }
 
-async function fetchIndicator(spec: IndicatorSpec): Promise<PrintPoint[]> {
-  let lastErr = 'No data source responded.';
+/** Union two raw monthly series by period; `recent` wins on overlap. Pure. */
+export function mergeRawByPeriod(base: PrintPoint[], recent: PrintPoint[]): PrintPoint[] {
+  const byPeriod = new Map<string, number>();
+  for (const p of base) byPeriod.set(p.period, p.value);
+  for (const p of recent) byPeriod.set(p.period, p.value); // official + current overrides the mirror
+  return [...byPeriod.entries()].map(([period, value]) => ({ period, value })).sort((a, b) => a.period.localeCompare(b.period));
+}
 
-  // Prefer the official BLS API (current) over the DBnomics mirror (can lag).
-  const blsSrc = spec.sources.find((s) => s.provider === 'BLS');
-  if (blsSrc) {
-    const raw = await fetchBlsProxy(blsSrc.series);
-    if (raw) {
-      const points = transformAndScale(raw, spec);
-      if (points.length >= 4) return points;
-    }
-  }
-
+async function fetchDbnomicsRaw(spec: IndicatorSpec): Promise<PrintPoint[]> {
   for (const src of spec.sources) {
     const url = `${API}/${src.provider}/${src.dataset}/${src.series}?observations=1&format=json`;
-    let res: Response;
     try {
-      res = await fetch(url, { headers: { Accept: 'application/json' } });
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      if (!res.ok) continue;
+      const raw = parseDbnomics(await res.json());
+      if (raw.length >= 8) return raw;
     } catch {
-      lastErr = 'Could not reach the data service (network).';
-      continue;
+      // try the next source
     }
-    if (!res.ok) {
-      lastErr = `Data service returned ${res.status} for ${src.provider}/${src.series}.`;
-      continue;
-    }
-    const raw = parseDbnomics(await res.json());
-    if (raw.length >= 8) {
-      const points = transformAndScale(raw, spec);
-      if (points.length >= 4) return points;
-    }
-    lastErr = `Series ${src.provider}/${src.series} returned too little data.`;
   }
-  throw new Error(lastErr);
+  return [];
+}
+
+async function fetchIndicator(spec: IndicatorSpec): Promise<PrintPoint[]> {
+  // BLS (current, via our proxy) provides the tail; DBnomics provides the deep
+  // history. Merge so the chart has BOTH depth and a current last print — the
+  // proxy's ~3 recent years override the mirror's frozen tail.
+  const blsSrc = spec.sources.find((s) => s.provider === 'BLS');
+  const [blsRaw, dbnRaw] = await Promise.all([
+    blsSrc ? fetchBlsProxy(blsSrc.series) : Promise.resolve(null),
+    fetchDbnomicsRaw(spec),
+  ]);
+
+  let raw: PrintPoint[] = [];
+  if (blsRaw && dbnRaw.length) raw = mergeRawByPeriod(dbnRaw, blsRaw);
+  else raw = (blsRaw && blsRaw.length ? blsRaw : dbnRaw);
+
+  if (raw.length >= 8) {
+    const points = transformAndScale(raw, spec);
+    if (points.length >= 4) return points;
+  }
+  throw new Error(
+    blsSrc
+      ? 'Neither the official BLS proxy nor the mirror returned enough data. On the live site the proxy needs a moment on first load; try Refresh.'
+      : 'No data source responded.',
+  );
 }
 
 export interface IndicatorLoad {
