@@ -256,6 +256,73 @@ export function gammaRead(p: GammaProfile): string {
   return parts.join('. ') + '.';
 }
 
+/* --------------------------- expected move ------------------------------- */
+
+export interface ExpectedMove {
+  spot: number;
+  /** at-the-money implied vol (decimal) at the nearest expiry */
+  atmIV: number;
+  expiry: string;
+  dte: number;
+  /** 1-sigma one-day move in index points, and as % of spot */
+  daily: number;
+  dailyPct: number;
+  dailyUpper: number;
+  dailyLower: number;
+  /** 1-sigma move out to the nearest expiry */
+  toExpiry: number;
+  expiryUpper: number;
+  expiryLower: number;
+}
+
+/**
+ * The options market's own priced move, from ATM implied vol at the nearest
+ * expiry. daily 1σ = spot · IV · √(1/252); to-expiry 1σ = spot · IV · √(dte/365).
+ * These bands are the intraday rails: ~68% of days finish inside the daily band,
+ * and the edges are where mean-reversion vs breakout gets decided. Pure.
+ */
+export function expectedMove(chain: ChainSnapshot): ExpectedMove | null {
+  const expiries = [...new Set(chain.entries.map((e) => e.expiry))].sort();
+  if (!expiries.length) return null;
+  const expiry = expiries[0];
+  const atNear = chain.entries.filter((e) => e.expiry === expiry && e.iv != null && e.iv > 0);
+  if (!atNear.length) return null;
+  const strikes = [...new Set(atNear.map((e) => e.strike))];
+  const atmStrike = strikes.reduce((b, s) => (Math.abs(s - chain.spot) < Math.abs(b - chain.spot) ? s : b), strikes[0]);
+  const ivs = atNear.filter((e) => e.strike === atmStrike).map((e) => e.iv!);
+  if (!ivs.length) return null;
+  const atmIV = ivs.reduce((a, b) => a + b, 0) / ivs.length;
+  const dte = Math.max(1, Math.round((new Date(expiry + 'T20:00:00Z').getTime() - Date.now()) / 86400000));
+  const daily = chain.spot * atmIV * Math.sqrt(1 / 252);
+  const toExpiry = chain.spot * atmIV * Math.sqrt(dte / 365);
+  return {
+    spot: chain.spot,
+    atmIV,
+    expiry,
+    dte,
+    daily,
+    dailyPct: (daily / chain.spot) * 100,
+    dailyUpper: chain.spot + daily,
+    dailyLower: chain.spot - daily,
+    toExpiry,
+    expiryUpper: chain.spot + toExpiry,
+    expiryLower: chain.spot - toExpiry,
+  };
+}
+
+/**
+ * Cumulative net dealer gamma across strikes (low → high). The curve's zero
+ * crossing is the gamma flip; its shape shows where dealer hedging flips from
+ * stabilizing to destabilizing. Pure.
+ */
+export function cumulativeGex(prof: GammaProfile): { strike: number; cum: number }[] {
+  let cum = 0;
+  return prof.rows.map((r) => {
+    cum += r.gex;
+    return { strike: r.strike, cum };
+  });
+}
+
 /* ------------------------------ key levels ------------------------------- */
 
 export interface KeyLevel {
