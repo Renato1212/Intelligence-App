@@ -46,6 +46,20 @@ function n(v: unknown): number | null {
 
 export const DATA_SOURCES: DataSource[] = [
   {
+    id: 'bls',
+    label: 'BLS (official) — via your deployment',
+    powers: 'Catalysts current prints (CPI, NFP, PPI, JOLTS)',
+    host: '/api/bls (serverless proxy)',
+    needsKey: false,
+    keyless: true,
+    url: () => '/api/bls?series=CUSR0000SA0',
+    parseSample: (j) => {
+      const arr = (j as { series?: { CUSR0000SA0?: { period?: string }[] } })?.series?.CUSR0000SA0;
+      const last = Array.isArray(arr) && arr.length ? arr[arr.length - 1]?.period : null;
+      return last ? `CPI thru ${last}` : null;
+    },
+  },
+  {
     id: 'cftc',
     label: 'CFTC — COT positioning',
     powers: 'Market Intel',

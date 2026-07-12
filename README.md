@@ -214,12 +214,22 @@ account:
 
 ### Release intelligence — the data behind every catalyst (free)
 The Catalysts section doesn't just list NFP and CPI — it shows what each release has actually been
-**printing**. The long history comes keylessly from DBnomics (the official BLS/ISM data,
-CORS-open, no account); because that free mirror can stall for months, the app **detects any gap
-against the release schedule and closes it automatically** with the as-released actuals from your
-free market-data key's historical calendar — with the provenance of every segment stated under
-the chart (official history to X · extended with N live prints to Y). Retail Sales and Core PCE,
-which have no free keyless mirror at all, build their history entirely from the live layer:
+**printing**, and it gets that data **current with zero setup**:
+
+- **Official BLS data, keyless, no setup** — CPI, NFP, PPI and JOLTS come straight from the U.S.
+  Bureau of Labor Statistics' own API through a tiny serverless proxy that ships with the app
+  (`/api/bls`). The BLS API doesn't allow direct browser calls (no CORS), so the proxy fetches it
+  server-side on your own deployment and hands the app **current, official prints** — you don't
+  enter a key or configure anything. (Optionally set a `BLS_API_KEY` env var on your deployment for
+  higher rate limits; it works keyless without one.)
+- **Resilient fallbacks** — if the proxy is unavailable (e.g. running the dev server locally), the
+  app falls back to the DBnomics mirror of the same official data, and then — if you've connected a
+  free market-data key — to the as-released actuals from its historical calendar. The provenance of
+  every segment is stated under the chart (official source, current to X · or · official history to
+  X · extended with N live prints to Y), so you always know exactly where the numbers came from.
+
+Retail Sales and Core PCE, which have no free keyless mirror at all, build their history entirely
+from the live layer:
 
 - **Print history charts** — 4 years of prints per indicator (payrolls change, unemployment, AHE,
   headline & core CPI m/m, core CPI y/y, PPI, JOLTS openings, both ISMs), with the ±1σ band and
