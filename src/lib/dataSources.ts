@@ -101,12 +101,12 @@ export const DATA_SOURCES: DataSource[] = [
   },
   {
     id: 'cboe',
-    label: 'CBOE — VIX & option chains',
+    label: 'CBOE — VIX & option chains (via your deployment)',
     powers: 'Options & Vol',
-    host: 'cdn.cboe.com',
+    host: '/api/cboe (serverless proxy)',
     needsKey: false,
     keyless: true,
-    url: () => 'https://cdn.cboe.com/api/global/delayed_quotes/quotes/_VIX.json',
+    url: () => '/api/cboe?kind=quote&symbol=_VIX',
     parseSample: (j) => {
       const p = n((j as { data?: { current_price?: unknown } })?.data?.current_price);
       return p != null ? `VIX ${p.toFixed(2)}` : null;
