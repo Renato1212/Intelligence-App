@@ -13,6 +13,8 @@ import {
 import { Principle, StatTile } from '../components/ui';
 import { upcomingEvents, localTime, type CalendarEvent } from '../lib/calendar';
 import {
+  cumulativeGex,
+  expectedMove,
   gammaProfile,
   gammaRead,
   keyLevels,
@@ -21,10 +23,12 @@ import {
   OPTION_ROOTS,
   vixRegime,
   type ChainSnapshot,
+  type ExpectedMove,
   type GammaProfile,
   type KeyLevel,
   type VixRegime,
 } from '../lib/options';
+import { Area, AreaChart } from 'recharts';
 import { fmtDateShort, todayISO, weekdayName } from '../lib/format';
 
 const AXIS = { stroke: 'transparent', tick: { fill: '#8a857a', fontSize: 11 }, tickLine: false } as const;
@@ -184,6 +188,82 @@ function KeyLevelsLadder({ prof, future, mapNote }: { prof: GammaProfile; future
   );
 }
 
+/** The options-priced expected move — the intraday rails to trade from. */
+function ExpectedMoveBlock({ em, future }: { em: ExpectedMove; future: string }) {
+  const r = (n: number) => Math.round(n).toLocaleString();
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div className="small muted" style={{ marginBottom: 6 }}>
+        Expected move — the options-priced 1σ range from ATM implied vol ({(em.atmIV * 100).toFixed(1)}%), read on <b>{future}</b>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginBottom: 10 }}>
+        <StatTile small label="Daily 1σ move" value={`±${em.daily.toFixed(0)}`} delta={`±${em.dailyPct.toFixed(2)}% of spot`} />
+        <StatTile small label="Today's range (68%)" value={`${r(em.dailyLower)}–${r(em.dailyUpper)}`} delta="1σ band" />
+        <StatTile small label={`To ${fmtDateShort(em.expiry)} (${em.dte}d)`} value={`±${em.toExpiry.toFixed(0)}`} delta={`${r(em.expiryLower)}–${r(em.expiryUpper)}`} />
+      </div>
+      <div style={{ position: 'relative', height: 34 }}>
+        <div style={{ position: 'absolute', left: 0, right: 0, top: 15, height: 4, background: 'linear-gradient(90deg,var(--loss),var(--surface-2,#2a2622),var(--profit))', borderRadius: 2, opacity: 0.6 }} />
+        {[
+          { x: 0, label: r(em.dailyLower), c: 'var(--loss)' },
+          { x: 50, label: `spot ${r(em.spot)}`, c: 'var(--gold)' },
+          { x: 100, label: r(em.dailyUpper), c: 'var(--profit)' },
+        ].map((m) => (
+          <div key={m.label} style={{ position: 'absolute', left: `${m.x}%`, top: 0, transform: `translateX(${m.x === 0 ? '0' : m.x === 100 ? '-100%' : '-50%'})`, textAlign: 'center' }}>
+            <div className="mono small" style={{ color: m.c, fontWeight: 700 }}>{m.label}</div>
+            <div style={{ width: 2, height: 10, background: m.c, margin: '2px auto 0' }} />
+          </div>
+        ))}
+      </div>
+      <div className="muted small" style={{ marginTop: 8 }}>
+        ~68% of sessions finish inside the daily band; the edges are where the fade-vs-breakout decision lives. In positive
+        gamma expect the band to hold (mean-revert to spot); in negative gamma expect the band to break and extend.
+      </div>
+    </div>
+  );
+}
+
+/** Cumulative dealer gamma across strikes — the SpotGamma-style flip profile. */
+function CumulativeGexChart({ cum, spot, flip }: { cum: { strike: number; cum: number }[]; spot: number; flip: number | null }) {
+  const data = cum.map((c) => ({ strike: c.strike, cum: c.cum / 1e9 }));
+  const win = data.filter((d) => Math.abs(d.strike - spot) / spot <= 0.08);
+  const use = win.length >= 8 ? win : data;
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div className="small muted" style={{ marginBottom: 4 }}>Cumulative dealer gamma — the flip profile (crosses zero at the gamma flip)</div>
+      <ResponsiveContainer width="100%" height={190}>
+        <AreaChart data={use} margin={{ top: 6, right: 12, bottom: 0, left: 4 }}>
+          <defs>
+            <linearGradient id="cumG" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#3987e5" stopOpacity={0.5} />
+              <stop offset="100%" stopColor="#3987e5" stopOpacity={0.04} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid stroke="#262320" vertical={false} />
+          <XAxis dataKey="strike" {...AXIS} minTickGap={40} />
+          <YAxis {...AXIS} width={54} tickFormatter={(v: number) => `${v.toFixed(1)}B`} />
+          <ReferenceLine y={0} stroke="#3a362f" />
+          <ReferenceLine x={spot} stroke="#d3a94f" strokeDasharray="4 3" label={{ value: 'spot', fill: '#d3a94f', fontSize: 11, position: 'top' }} />
+          {flip != null && <ReferenceLine x={flip} stroke="#3987e5" strokeDasharray="4 3" label={{ value: 'flip', fill: '#3987e5', fontSize: 11, position: 'insideTopRight' }} />}
+          <Tooltip
+            cursor={{ stroke: 'rgba(255,255,255,0.1)' }}
+            content={({ active, payload }) => {
+              if (!active || !payload?.length) return null;
+              const p = payload[0].payload as { strike: number; cum: number };
+              return (
+                <div className="viz-tooltip">
+                  <div className="tt-title">Strike {p.strike}</div>
+                  <div className="tt-row"><span>Cumulative GEX</span><b>{p.cum.toFixed(2)}B / 1%</b></div>
+                </div>
+              );
+            }}
+          />
+          <Area dataKey="cum" stroke="#3987e5" strokeWidth={1.8} fill="url(#cumG)" isAnimationActive={false} />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
 function GammaPanel() {
   const [rootSym, setRootSym] = useState(OPTION_ROOTS[0].root);
   const [chains, setChains] = useState<Record<string, ChainSnapshot | null>>({});
@@ -219,6 +299,8 @@ function GammaPanel() {
     return gammaProfile(chain, monthly ? [monthly] : 'nearest');
   }, [chain, sel]);
 
+  const em = useMemo(() => (chain ? expectedMove(chain) : null), [chain]);
+  const cum = useMemo(() => (prof ? cumulativeGex(prof) : []), [prof]);
   const nextOpex = useMemo(() => upcomingEvents(todayISO(), 35).find((e) => e.short === 'OPEX' || e.short === 'Quad Witching') ?? null, []);
 
   return (
@@ -273,6 +355,7 @@ function GammaPanel() {
               delta={nextOpex ? `OPEX ${weekdayName(nextOpex.date).slice(0, 3)} ${nextOpex.date.slice(5)}` : undefined}
             />
           </div>
+          {em && <ExpectedMoveBlock em={em} future={rootInfo.future} />}
           <GexChart prof={prof} />
           <div className="row" style={{ gap: 14, marginTop: 6, flexWrap: 'wrap' }}>
             <span className="small"><span className="grade-dot" style={{ background: 'rgba(12,163,12,0.8)' }} /> net GEX + (dampening)</span>
@@ -281,6 +364,7 @@ function GammaPanel() {
               {prof.included.length === 1 ? `expiry ${fmtDateShort(prof.included[0])}` : `${prof.included.length} expiries`} · as of {chain ? new Date(chain.fetchedAt).toLocaleTimeString().slice(0, 5) : ''} (delayed)
             </span>
           </div>
+          {cum.length >= 4 && <CumulativeGexChart cum={cum} spot={prof.spot} flip={prof.zeroGamma} />}
           <p className="small" style={{ margin: '12px 0 0', color: 'var(--gold)' }}>{gammaRead(prof)}</p>
           <KeyLevelsLadder prof={prof} future={rootInfo.future} mapNote={rootInfo.mapNote} />
         </>
