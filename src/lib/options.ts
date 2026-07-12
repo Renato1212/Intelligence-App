@@ -415,11 +415,14 @@ export function vixRegime(vix: number, vix9d: number | null, vix3m: number | nul
 
 /* ------------------------------- fetching ------------------------------- */
 
-const CDN = 'https://cdn.cboe.com/api/global/delayed_quotes';
+// CBOE's CDN is not CORS-enabled, so we go through our own serverless proxy
+// (/api/cboe) which fetches it server-side and slims the chain. Keyless.
+const PROXY = '/api/cboe';
 const QUOTE_TTL = 60 * 1000; // delayed feed; refresh read every minute
 const CHAIN_TTL = 15 * 60 * 1000; // chains are heavy — 15-minute cache
-const QUOTE_KEY = 'ei-cboe-quotes-v1';
-const CHAIN_KEY = 'ei-cboe-chain-v2'; // v2: per-root entries
+const QUOTE_KEY = 'ei-cboe-quotes-v2'; // v2: via proxy
+const CHAIN_KEY = 'ei-cboe-chain-v3'; // v3: via proxy (server-slimmed)
+const UNREACHABLE = 'Could not reach the CBOE proxy. On the live site this is served by /api/cboe; in local dev (no serverless) it is unavailable.';
 
 interface QuoteCache {
   [symbol: string]: { at: number; quote: CboeQuote };
@@ -435,8 +438,8 @@ export async function loadCboeQuote(symbol: string): Promise<{ quote: CboeQuote 
   const hit = cache[symbol];
   if (hit && Date.now() - hit.at < QUOTE_TTL) return { quote: hit.quote, error: null };
   try {
-    const res = await fetch(`${CDN}/quotes/${encodeURIComponent(symbol)}.json`, { headers: { Accept: 'application/json' } });
-    if (!res.ok) return { quote: hit?.quote ?? null, error: `CBOE returned ${res.status} for ${symbol}.` };
+    const res = await fetch(`${PROXY}?kind=quote&symbol=${encodeURIComponent(symbol)}`, { headers: { Accept: 'application/json' } });
+    if (!res.ok) return { quote: hit?.quote ?? null, error: `CBOE proxy returned ${res.status} for ${symbol}.` };
     const quote = parseQuote(await res.json(), symbol);
     if (!quote) return { quote: hit?.quote ?? null, error: `Unexpected CBOE payload for ${symbol}.` };
     cache[symbol] = { at: Date.now(), quote };
@@ -447,7 +450,7 @@ export async function loadCboeQuote(symbol: string): Promise<{ quote: CboeQuote 
     }
     return { quote, error: null };
   } catch {
-    return { quote: hit?.quote ?? null, error: 'Could not reach the CBOE data CDN (network).' };
+    return { quote: hit?.quote ?? null, error: UNREACHABLE };
   }
 }
 
@@ -469,11 +472,11 @@ export async function loadChain(root = '_SPX', force = false): Promise<{ chain: 
     return { chain: cached, error: null };
   }
   try {
-    const res = await fetch(`${CDN}/options/${encodeURIComponent(root)}.json`, { headers: { Accept: 'application/json' } });
-    if (!res.ok) return { chain: cached ? { ...cached, stale: true } : null, error: `CBOE returned ${res.status} for the ${root} chain.` };
+    const res = await fetch(`${PROXY}?kind=chain&symbol=${encodeURIComponent(root)}`, { headers: { Accept: 'application/json' } });
+    if (!res.ok) return { chain: cached ? { ...cached, stale: true } : null, error: `CBOE proxy returned ${res.status} for the ${root} chain.` };
     const chain = parseChain(await res.json(), root);
     if (!chain) return { chain: cached ? { ...cached, stale: true } : null, error: 'Unexpected CBOE chain payload.' };
-    // keep the cache small: only strikes within ±25% of spot, OI > 0
+    // the proxy already slims to ~±15% of spot; keep a defensive ±25% cap
     const slim: ChainSnapshot = {
       ...chain,
       entries: chain.entries.filter((e) => Math.abs(e.strike - chain.spot) / chain.spot <= 0.25),
@@ -485,6 +488,6 @@ export async function loadChain(root = '_SPX', force = false): Promise<{ chain: 
     }
     return { chain: slim, error: null };
   } catch {
-    return { chain: cached ? { ...cached, stale: true } : null, error: 'Could not reach the CBOE data CDN (network).' };
+    return { chain: cached ? { ...cached, stale: true } : null, error: UNREACHABLE };
   }
 }

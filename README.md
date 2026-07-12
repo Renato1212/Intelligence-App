@@ -185,7 +185,9 @@ One page that answers "what regime am I trading in?" before the open:
 
 ### Options & Vol — the dealer-flow layer (free, keyless)
 The mechanics that move the index intraday, from CBOE's own delayed-quote feed — no key, no
-account:
+account. CBOE's CDN doesn't allow direct browser calls (CORS), so — like the BLS data — a small
+serverless proxy that ships with the app (`/api/cboe`) fetches it server-side and slims the chain
+to the strikes near spot before handing it to the browser. Nothing to configure:
 
 - **The VIX complex, live** — VIX, VIX9D and VIX3M refreshing every minute, with the 9D/30D and
   30D/3M term-structure ratios computed into a **vol regime** (calm carry / nervous / event
