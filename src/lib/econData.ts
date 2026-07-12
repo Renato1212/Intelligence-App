@@ -305,8 +305,65 @@ export function parseDbnomics(json: unknown, granularity: 'month' | 'day' = 'mon
   return out.sort((a, b) => a.period.localeCompare(b.period));
 }
 
+/** Apply the indicator's transform + scale to a raw ascending series. */
+function transformAndScale(raw: PrintPoint[], spec: IndicatorSpec): PrintPoint[] {
+  // keep ~9 years raw so 8y of transformed history survives a YoY transform
+  const trimmed = raw.slice(Math.max(0, raw.length - 108));
+  let points = applyTransform(trimmed, spec.transform);
+  if (spec.scale != null) points = points.map((p) => ({ period: p.period, value: p.value * spec.scale! }));
+  return points;
+}
+
+/** Parse the /api/bls proxy response for one BLS series into raw points. */
+export function parseBlsProxy(json: unknown, series: string): PrintPoint[] {
+  const arr = (json as { series?: Record<string, { period?: unknown; value?: unknown }[]> })?.series?.[series];
+  if (!Array.isArray(arr)) return [];
+  const out: PrintPoint[] = [];
+  for (const p of arr) {
+    const period = String(p.period ?? '');
+    const value = Number(p.value);
+    if (/^\d{4}-\d{2}$/.test(period) && isFinite(value)) out.push({ period, value });
+  }
+  return out.sort((a, b) => a.period.localeCompare(b.period));
+}
+
+/**
+ * Current, official prints from the BLS API via our own serverless proxy
+ * (/api/bls). Keyless and — critically — CURRENT, unlike the DBnomics mirror
+ * which can freeze for months. Only present on the deployed app (the proxy is
+ * a Vercel function); in local dev the call falls through to DBnomics.
+ */
+async function fetchBlsProxy(series: string): Promise<PrintPoint[] | null> {
+  let res: Response;
+  try {
+    res = await fetch(`/api/bls?series=${encodeURIComponent(series)}`, { headers: { Accept: 'application/json' } });
+  } catch {
+    return null;
+  }
+  if (!res.ok) return null;
+  let json: unknown;
+  try {
+    json = await res.json(); // in local dev the SPA returns index.html → throws → null
+  } catch {
+    return null;
+  }
+  const raw = parseBlsProxy(json, series);
+  return raw.length >= 8 ? raw : null;
+}
+
 async function fetchIndicator(spec: IndicatorSpec): Promise<PrintPoint[]> {
   let lastErr = 'No data source responded.';
+
+  // Prefer the official BLS API (current) over the DBnomics mirror (can lag).
+  const blsSrc = spec.sources.find((s) => s.provider === 'BLS');
+  if (blsSrc) {
+    const raw = await fetchBlsProxy(blsSrc.series);
+    if (raw) {
+      const points = transformAndScale(raw, spec);
+      if (points.length >= 4) return points;
+    }
+  }
+
   for (const src of spec.sources) {
     const url = `${API}/${src.provider}/${src.dataset}/${src.series}?observations=1&format=json`;
     let res: Response;
@@ -322,10 +379,7 @@ async function fetchIndicator(spec: IndicatorSpec): Promise<PrintPoint[]> {
     }
     const raw = parseDbnomics(await res.json());
     if (raw.length >= 8) {
-      // keep ~9 years raw so 8y of transformed history survives a YoY transform
-      const trimmed = raw.slice(Math.max(0, raw.length - 108));
-      let points = applyTransform(trimmed, spec.transform);
-      if (spec.scale != null) points = points.map((p) => ({ period: p.period, value: p.value * spec.scale! }));
+      const points = transformAndScale(raw, spec);
       if (points.length >= 4) return points;
     }
     lastErr = `Series ${src.provider}/${src.series} returned too little data.`;

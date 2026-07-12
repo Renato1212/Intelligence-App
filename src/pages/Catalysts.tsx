@@ -281,16 +281,17 @@ function ProvenanceLine({ series }: { series: IndicatorSeries }) {
         <span className="muted">History reconstructed from your market-data key's release calendar (as-released prints, not revised).</span>
       ) : liveCount > 0 ? (
         <span className="muted">
-          Official history (DBnomics) to <b>{fmtPeriod(officialThrough)}</b> · extended with <b>{liveCount}</b> as-released prints from your
+          Official history to <b>{fmtPeriod(officialThrough)}</b> · extended with <b>{liveCount}</b> as-released prints from your
           market-data key to <b>{last ? fmtPeriod(last) : '—'}</b>.
         </span>
       ) : gap >= 2 ? (
         <span style={{ color: 'var(--loss)' }}>
-          ⚠ History ends {last ? fmtPeriod(last) : '—'} — the free official mirror has stalled. Connect the free FMP key (Trading Day →
-          Preparation) and the missing prints fill in automatically from the release calendar.
+          ⚠ History ends {last ? fmtPeriod(last) : '—'} — the official sources are lagging or unreachable. On the live site the app
+          auto-fetches current prints straight from the BLS API; if you still see this, connect the free FMP key (Trading Day → Preparation)
+          as a backup.
         </span>
       ) : (
-        <span className="muted">Official history (DBnomics) to {last ? fmtPeriod(last) : '—'}.</span>
+        <span className="muted">Official source (BLS), current to {last ? fmtPeriod(last) : '—'}.</span>
       )}
     </div>
   );
