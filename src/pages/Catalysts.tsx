@@ -33,6 +33,7 @@ import {
   type PrintStats,
 } from '../lib/econData';
 import { staleGapMonths } from '../lib/econLive';
+import { loadReleaseDetail, RELEASE_DETAILS, type ReleaseDetailLoad } from '../lib/releaseDetail';
 import { eventDaySplit, perEventStats, proximitySplit, type PerEventStat } from '../lib/eventStats';
 import { fetchUSCalendarRange, getMarketApiKey, liveReadingsFor, parseReading, type LiveEventRow } from '../lib/market';
 import { addDays, fmtMoney, todayISO, weekdayName } from '../lib/format';
@@ -333,6 +334,87 @@ function RecentPrints({ series }: { series: IndicatorSeries }) {
   );
 }
 
+/** The subprint breakdown: real levels + MoM + YoY per component, cross-read. */
+function ReleaseDetail({ short }: { short: string }) {
+  const spec = RELEASE_DETAILS[short];
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState<ReleaseDetailLoad | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const load = (force: boolean) => {
+    setLoading(true);
+    void loadReleaseDetail(short, force).then((d) => {
+      setData(d);
+      setLoading(false);
+    });
+  };
+  useEffect(() => {
+    if (open && !data && !loading) load(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const pct = (v: number | null) =>
+    v == null ? <span className="muted">—</span> : (
+      <span className="mono" style={{ color: v > 0 ? 'var(--profit)' : v < 0 ? 'var(--loss)' : undefined }}>{v >= 0 ? '+' : ''}{v.toFixed(2)}%</span>
+    );
+
+  return (
+    <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--hairline)' }}>
+      <div className="spread" style={{ alignItems: 'center', cursor: 'pointer' }} onClick={() => setOpen((o) => !o)}>
+        <b className="small" style={{ color: 'var(--gold)' }}>{open ? '▾' : '▸'} {spec.title} — real levels &amp; every subcomponent (MoM · YoY)</b>
+        {open && (
+          <button className="btn sm" disabled={loading} onClick={(e) => { e.stopPropagation(); load(true); }}>{loading ? 'Loading…' : 'Refresh'}</button>
+        )}
+      </div>
+      {open && (
+        <div style={{ marginTop: 10 }}>
+          {!data ? (
+            <div className="muted small">Loading the full BLS breakdown…</div>
+          ) : data.error ? (
+            <div className="muted small">{data.error}</div>
+          ) : (
+            <>
+              <div style={{ overflowX: 'auto' }}>
+                <table className="data" style={{ minWidth: 620 }}>
+                  <thead>
+                    <tr>
+                      <th>Component</th>
+                      <th style={{ textAlign: 'right' }}>Weight</th>
+                      <th style={{ textAlign: 'right' }}>Index</th>
+                      <th style={{ textAlign: 'right' }}>MoM</th>
+                      <th style={{ textAlign: 'right' }}>YoY</th>
+                      <th style={{ textAlign: 'right' }}>3m ann.</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.reads.map((r) => (
+                      <tr key={r.comp.series} style={{ fontWeight: r.comp.role === 'headline' ? 700 : r.comp.role === 'core' ? 600 : 400 }}>
+                        <td title={r.comp.note}>
+                          {r.comp.label}
+                          {r.comp.note && <span className="muted" style={{ marginLeft: 4 }}>ⓘ</span>}
+                        </td>
+                        <td className="muted mono small" style={{ textAlign: 'right' }}>{r.comp.weight != null ? `${r.comp.weight}%` : '—'}</td>
+                        <td className="mono" style={{ textAlign: 'right' }}>{r.level != null ? r.level.toFixed(1) : '—'}</td>
+                        <td style={{ textAlign: 'right' }}>{pct(r.momPct)}</td>
+                        <td style={{ textAlign: 'right' }}>{pct(r.yoyPct)}</td>
+                        <td style={{ textAlign: 'right' }}>{pct(r.annualized3m)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="muted small" style={{ marginTop: 6 }}>
+                {spec.unitNote} · latest period {data.reads.find((r) => r.period)?.period ?? '—'} · hover a component for what it means.
+              </div>
+              {data.cross && <p className="small" style={{ margin: '10px 0 0', color: 'var(--gold)' }}>{data.cross}</p>}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** The market-implications study: how this print maps onto each instrument. */
 function ImplicationsStudy({ short }: { short: string }) {
   const pb = PRINT_PLAYBOOK[short];
@@ -524,6 +606,8 @@ function ReleaseIntel({ record, now }: { record: PerEventStat[]; now: number }) 
           )}
         </>
       )}
+
+      {RELEASE_DETAILS[short] && <ReleaseDetail short={short} />}
 
       <ImplicationsStudy short={short} />
 
