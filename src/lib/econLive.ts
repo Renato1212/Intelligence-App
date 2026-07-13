@@ -15,7 +15,7 @@
  * attribution, unit normalization, revision dedupe and the merge are all
  * unit-testable offline.
  */
-import { getMarketApiKey, type LiveEventRow } from './market';
+import { fmpUrls, type LiveEventRow } from './market';
 import type { IndicatorSpec, PrintPoint } from './econData';
 
 /* ------------------------- matching & attribution ------------------------ */
@@ -157,33 +157,41 @@ function fmtVal(v: unknown): string | null {
   return String(v);
 }
 
-async function fetchRangeRaw(fromISO: string, toISO: string, key: string): Promise<LiveEventRow[] | null> {
+async function fetchRangeRaw(fromISO: string, toISO: string): Promise<LiveEventRow[] | null> {
   const urls = [
-    `https://financialmodelingprep.com/stable/economic-calendar?from=${fromISO}&to=${toISO}&apikey=${key}`,
-    `https://financialmodelingprep.com/api/v3/economic_calendar?from=${fromISO}&to=${toISO}&apikey=${key}`,
+    ...fmpUrls(`stable/economic-calendar?from=${fromISO}&to=${toISO}`),
+    ...fmpUrls(`api/v3/economic_calendar?from=${fromISO}&to=${toISO}`),
   ];
   for (const url of urls) {
     let res: Response;
     try {
       res = await fetch(url);
     } catch {
-      return null;
+      continue;
     }
     if (!res.ok) {
       if (res.status === 401) return null;
       continue;
     }
     const raw = (await res.json()) as Record<string, unknown>[];
-    return (Array.isArray(raw) ? raw : [])
+    const rows = (Array.isArray(raw) ? raw : [])
       .filter((e) => ['US', 'USA', 'UNITED STATES'].includes(String(e.country ?? '').toUpperCase()))
-      .map((e) => ({
-        date: String(e.date ?? '').slice(0, 10),
-        name: String(e.event ?? ''),
-        consensus: fmtVal(e.estimate),
-        previous: fmtVal(e.previous),
-        actual: fmtVal(e.actual),
-      }))
+      .map((e) => {
+        const unit = typeof e.unit === 'string' && ['%', 'K', 'M', 'B', 'T'].includes(e.unit.trim()) ? e.unit.trim() : '';
+        const withUnit = (v: unknown) => {
+          const s = fmtVal(v);
+          return s != null && unit && /^-?\d+(\.\d+)?$/.test(s) ? `${s}${unit}` : s;
+        };
+        return {
+          date: String(e.date ?? '').slice(0, 10),
+          name: String(e.event ?? ''),
+          consensus: withUnit(e.estimate),
+          previous: withUnit(e.previous),
+          actual: withUnit(e.actual),
+        };
+      })
       .filter((e) => e.date && e.name);
+    if (rows.length) return rows;
   }
   return null;
 }
@@ -194,8 +202,6 @@ async function fetchRangeRaw(fromISO: string, toISO: string, key: string): Promi
  * concurrent callers (all indicators share one row set).
  */
 export async function getHistoricalRows(monthsBack: number): Promise<LiveEventRow[] | null> {
-  const key = getMarketApiKey();
-  if (!key) return null;
   const months = Math.min(24, Math.max(3, monthsBack));
   const now = new Date();
   const from = new Date(now.getFullYear(), now.getMonth() - months, 1);
@@ -224,7 +230,7 @@ export async function getHistoricalRows(monthsBack: number): Promise<LiveEventRo
     while (cursor < now) {
       const chunkEnd = new Date(cursor.getFullYear(), cursor.getMonth() + 3, cursor.getDate());
       const end = chunkEnd < now ? chunkEnd : now;
-      const part = await fetchRangeRaw(cursor.toISOString().slice(0, 10), end.toISOString().slice(0, 10), key);
+      const part = await fetchRangeRaw(cursor.toISOString().slice(0, 10), end.toISOString().slice(0, 10));
       if (part) {
         anyOk = true;
         rows.push(...part);

@@ -9,6 +9,8 @@
  * index/forex/commodity feeds. The ETFs track the same underlyings, so the
  * risk-sense read is preserved while working on a free key.
  */
+import { fetchFfRows } from './ffcal';
+import { fmtLisbon } from './tz';
 
 export interface EconEvent {
   time: string; // HH:MM local
@@ -44,6 +46,22 @@ export function getMarketApiKey(): string {
   return localStorage.getItem(KEY_STORAGE) ?? '';
 }
 
+/**
+ * Candidate URLs for one FMP path, tried in order:
+ *  1. direct with the browser key (when one is pasted in Settings),
+ *  2. the deployment's /api/fmp relay (works when FMP_API_KEY is set as a
+ *     Vercel env var — connect once, every device works with no browser key).
+ * The relay answers 501 instantly when no server key is configured, so the
+ * fall-through is cheap.
+ */
+export function fmpUrls(pathWithQuery: string): string[] {
+  const key = getMarketApiKey();
+  const urls: string[] = [];
+  if (key) urls.push(`https://financialmodelingprep.com/${pathWithQuery}${pathWithQuery.includes('?') ? '&' : '?'}apikey=${key}`);
+  urls.push(`/api/fmp?p=${encodeURIComponent(pathWithQuery)}`);
+  return urls;
+}
+
 export function setMarketApiKey(key: string): void {
   if (key.trim()) localStorage.setItem(KEY_STORAGE, key.trim());
   else localStorage.removeItem(KEY_STORAGE);
@@ -67,9 +85,14 @@ const QUOTE_SYMBOLS: { symbol: string; label: string }[] = [
 
 const MAJOR_COUNTRIES = new Set(['US', 'EA', 'EU', 'EMU', 'GB', 'UK', 'DE', 'JP', 'CA', 'CH', 'CN']);
 
-function fmtVal(v: unknown): string | null {
+/** Provider values are numeric with a separate unit field — reattach it so
+ * "215" + "K" reads (and parses) as "215K", "4.2" + "%" as "4.2%". */
+function fmtVal(v: unknown, unit?: unknown): string | null {
   if (v == null || v === '') return null;
-  return String(v);
+  const s = String(v);
+  const u = typeof unit === 'string' ? unit.trim() : '';
+  if (u && ['%', 'K', 'M', 'B', 'T'].includes(u) && /^-?\d+(\.\d+)?$/.test(s)) return `${s}${u}`;
+  return s;
 }
 
 function planError(status: number, what: string): string {
@@ -79,11 +102,11 @@ function planError(status: number, what: string): string {
   return `Request failed (${status}).`;
 }
 
-async function fetchEvents(date: string, key: string): Promise<{ events: EconEvent[]; error: string | null }> {
-  // stable endpoint first, fall back to the legacy v3 path
+async function fetchEvents(date: string): Promise<{ events: EconEvent[]; error: string | null }> {
+  // FMP first (browser key, then the /api/fmp server-key relay), both paths
   const urls = [
-    `https://financialmodelingprep.com/stable/economic-calendar?from=${date}&to=${date}&apikey=${key}`,
-    `https://financialmodelingprep.com/api/v3/economic_calendar?from=${date}&to=${date}&apikey=${key}`,
+    ...fmpUrls(`stable/economic-calendar?from=${date}&to=${date}`),
+    ...fmpUrls(`api/v3/economic_calendar?from=${date}&to=${date}`),
   ];
   let lastStatus = 0;
   for (const url of urls) {
@@ -91,7 +114,7 @@ async function fetchEvents(date: string, key: string): Promise<{ events: EconEve
     try {
       res = await fetch(url);
     } catch {
-      return { events: [], error: 'Could not reach the market-data service (network/CORS).' };
+      continue;
     }
     if (res.ok) {
       const raw = (await res.json()) as Record<string, unknown>[];
@@ -103,41 +126,67 @@ async function fetchEvents(date: string, key: string): Promise<{ events: EconEve
         })
         .map((e) => {
           const dt = String(e.date ?? '');
-          // the provider reports timestamps in UTC — render in the viewer's zone
+          // provider timestamps are UTC — render in Lisbon
           const instant = dt.length >= 16 ? new Date(dt.replace(' ', 'T') + 'Z') : null;
-          const local = instant && !isNaN(instant.getTime())
-            ? `${String(instant.getHours()).padStart(2, '0')}:${String(instant.getMinutes()).padStart(2, '0')}`
-            : dt.slice(11, 16);
+          const local = instant && !isNaN(instant.getTime()) ? fmtLisbon(instant) : dt.slice(11, 16);
           return {
             time: local,
             dateTime: dt,
             name: String(e.event ?? ''),
             country: String(e.country ?? '').toUpperCase(),
             impact: String(e.impact ?? ''),
-            consensus: fmtVal(e.estimate),
-            previous: fmtVal(e.previous),
-            actual: fmtVal(e.actual),
+            consensus: fmtVal(e.estimate, e.unit),
+            previous: fmtVal(e.previous, e.unit),
+            actual: fmtVal(e.actual, e.unit),
           };
         })
         .sort((a, b) => a.dateTime.localeCompare(b.dateTime));
-      return { events, error: null };
+      if (events.length) return { events, error: null };
+    } else {
+      lastStatus = res.status;
+      if (res.status === 401) break; // bad key won't fix on the fallback
     }
-    lastStatus = res.status;
-    if (res.status === 401) break; // bad key won't fix on the fallback
+  }
+
+  // keyless fallback: the weekly feed (US rows, with real release times)
+  const ff = await fetchFfRows();
+  const todays = ff.filter((r) => r.date === date);
+  if (todays.length) {
+    const events = todays
+      .map((r) => ({
+        time: r.instant ? fmtLisbon(r.instant) : '',
+        dateTime: r.instant ?? `${r.date} 00:00:00`,
+        name: r.name,
+        country: 'US',
+        impact: 'Medium',
+        consensus: r.consensus,
+        previous: r.previous,
+        actual: r.actual,
+      }))
+      .sort((a, b) => a.dateTime.localeCompare(b.dateTime));
+    return { events, error: null };
   }
   return { events: [], error: planError(lastStatus, 'the economic calendar') };
 }
 
-async function fetchQuotes(key: string): Promise<{ quotes: QuoteRow[]; error: string | null }> {
+async function fetchQuotes(): Promise<{ quotes: QuoteRow[]; error: string | null }> {
   const symbols = QUOTE_SYMBOLS.map((q) => q.symbol).join(',');
-  const url = `https://financialmodelingprep.com/api/v3/quote/${symbols}?apikey=${key}`;
-  let res: Response;
-  try {
-    res = await fetch(url);
-  } catch {
-    return { quotes: [], error: 'Could not reach the market-data service (network/CORS).' };
+  let res: Response | null = null;
+  for (const url of fmpUrls(`api/v3/quote/${symbols}`)) {
+    try {
+      const r = await fetch(url);
+      if (r.ok) {
+        res = r;
+        break;
+      }
+      res = r;
+      if (r.status === 401) break;
+    } catch {
+      // try the next candidate
+    }
   }
-  if (!res.ok) return { quotes: [], error: planError(res.status, 'live quotes') };
+  if (!res) return { quotes: [], error: 'Could not reach the market-data service (network/CORS).' };
+  if (!res.ok) return { quotes: [], error: res.status === 501 ? 'Quotes need an FMP key — paste one in Settings, or set FMP_API_KEY on the deployment (one-time, works everywhere).' : planError(res.status, 'live quotes') };
   const raw = (await res.json()) as Record<string, unknown>[];
   const bySymbol = new Map((Array.isArray(raw) ? raw : []).map((q) => [String(q.symbol), q]));
   const quotes = QUOTE_SYMBOLS.filter((s) => {
@@ -152,10 +201,7 @@ async function fetchQuotes(key: string): Promise<{ quotes: QuoteRow[]; error: st
 }
 
 export async function fetchBriefing(date: string): Promise<Briefing> {
-  const key = getMarketApiKey();
-  if (!key) throw new Error('no-key');
-
-  const [ev, qt] = await Promise.all([fetchEvents(date, key), fetchQuotes(key)]);
+  const [ev, qt] = await Promise.all([fetchEvents(date), fetchQuotes()]);
   const briefing: Briefing = {
     events: ev.events,
     quotes: qt.quotes,
@@ -180,6 +226,8 @@ export interface LiveEventRow {
   consensus: string | null;
   previous: string | null;
   actual: string | null;
+  /** optional release instant (ISO), when the source carries a time */
+  instant?: string;
 }
 
 /* Cached provider rows per fetched range, so date reconciliation (reconcile.ts)
@@ -239,11 +287,9 @@ export function cachedRowsCovering(dateISO: string): { covered: boolean; from: s
  * consensus / previous / actual readings to the deterministic calendar.
  */
 export async function fetchUSCalendarRange(fromISO: string, toISO: string): Promise<{ rows: LiveEventRow[]; error: string | null }> {
-  const key = getMarketApiKey();
-  if (!key) return { rows: [], error: 'no-key' };
   const urls = [
-    `https://financialmodelingprep.com/stable/economic-calendar?from=${fromISO}&to=${toISO}&apikey=${key}`,
-    `https://financialmodelingprep.com/api/v3/economic_calendar?from=${fromISO}&to=${toISO}&apikey=${key}`,
+    ...fmpUrls(`stable/economic-calendar?from=${fromISO}&to=${toISO}`),
+    ...fmpUrls(`api/v3/economic_calendar?from=${fromISO}&to=${toISO}`),
   ];
   let lastStatus = 0;
   for (const url of urls) {
@@ -251,7 +297,7 @@ export async function fetchUSCalendarRange(fromISO: string, toISO: string): Prom
     try {
       res = await fetch(url);
     } catch {
-      return { rows: [], error: 'Could not reach the market-data service (network/CORS).' };
+      continue;
     }
     if (res.ok) {
       const raw = (await res.json()) as Record<string, unknown>[];
@@ -260,16 +306,27 @@ export async function fetchUSCalendarRange(fromISO: string, toISO: string): Prom
         .map((e) => ({
           date: String(e.date ?? '').slice(0, 10),
           name: String(e.event ?? ''),
-          consensus: fmtVal(e.estimate),
-          previous: fmtVal(e.previous),
-          actual: fmtVal(e.actual),
+          consensus: fmtVal(e.estimate, e.unit),
+          previous: fmtVal(e.previous, e.unit),
+          actual: fmtVal(e.actual, e.unit),
         }))
         .filter((e) => e.date && e.name);
-      if (rows.length >= 8) storeLiveCalRange({ fetchedAt: new Date().toISOString(), from: fromISO, to: toISO, rows });
-      return { rows, error: null };
+      if (rows.length >= 8) {
+        storeLiveCalRange({ fetchedAt: new Date().toISOString(), from: fromISO, to: toISO, rows });
+        return { rows, error: null };
+      }
+      if (rows.length) return { rows, error: null };
+    } else {
+      lastStatus = res.status;
+      if (res.status === 401) break;
     }
-    lastStatus = res.status;
-    if (res.status === 401) break;
+  }
+
+  // keyless fallback: the weekly feed covers this week + next
+  const ff = (await fetchFfRows()).filter((r) => r.date >= fromISO && r.date <= toISO);
+  if (ff.length) {
+    if (ff.length >= 8) storeLiveCalRange({ fetchedAt: new Date().toISOString(), from: fromISO, to: toISO, rows: ff });
+    return { rows: ff, error: null };
   }
   return { rows: [], error: planError(lastStatus, 'the economic calendar') };
 }
@@ -287,16 +344,18 @@ export function hasLiveMatcher(short: string): boolean {
 
 /** Match provider event names to the deterministic calendar's shorts. */
 const LIVE_MATCHERS: Record<string, RegExp> = {
-  NFP: /non.?farm payrolls(?! private)|nonfarm payrolls$/i,
+  // covers both provider styles: "Non Farm Payrolls" (FMP) and
+  // "Non-Farm Employment Change" (weekly feed)
+  NFP: /non.?farm payrolls(?! private)|nonfarm payrolls$|non.?farm employment change/i,
   CPI: /\bcpi\b|consumer price/i,
   PPI: /\bppi\b|producer price/i,
-  'Jobless Claims': /initial jobless|initial claims/i,
+  'Jobless Claims': /initial jobless|initial claims|unemployment claims/i,
   JOLTS: /jolts?/i,
   'ISM Mfg': /ism manufacturing/i,
   'ISM Svcs': /ism (non.?manufacturing|services)/i,
   'Retail Sales': /retail sales/i,
   PCE: /\bpce\b/i,
-  FOMC: /fed(eral)? (funds )?(interest )?rate decision|fomc.*(decision|statement)/i,
+  FOMC: /fed(eral)? (funds )?(interest )?rate decision|federal funds rate|fomc.*(decision|statement)/i,
   'FOMC Minutes': /fomc minutes/i,
 };
 

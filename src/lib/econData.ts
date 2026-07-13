@@ -16,7 +16,6 @@
  * unit-testable without the network.
  */
 
-import { getMarketApiKey } from './market';
 import { fetchRecentPrints, mergePrints, staleGapMonths } from './econLive';
 
 export type Transform = 'diff' | 'pct1' | 'pct12' | 'level';
@@ -436,7 +435,9 @@ export async function loadIndicator(spec: IndicatorSpec, force = false): Promise
   const officialThrough = official.length ? official[official.length - 1].period : null;
   let liveCount = 0;
   const gap = staleGapMonths(officialThrough);
-  if (gap >= 1 && getMarketApiKey()) {
+  // the live layer works with a browser key OR the /api/fmp server key —
+  // always attempt when behind; it fails fast and cheap when neither exists
+  if (gap >= 1) {
     try {
       const recent = await fetchRecentPrints(spec, gap);
       const merged = mergePrints(official, recent);
