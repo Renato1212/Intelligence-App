@@ -128,13 +128,23 @@ export const DATA_SOURCES: DataSource[] = [
     },
   },
   {
+    id: 'ffcal',
+    label: 'Weekly calendar feed — via your deployment',
+    powers: 'Keyless consensus & calendar (Catalysts, briefing fallback)',
+    host: '/api/ffcal (serverless proxy)',
+    needsKey: false,
+    keyless: true,
+    url: () => '/api/ffcal?week=this',
+    parseSample: (j) => (Array.isArray(j) && j.length ? `${j.length} events this week` : null),
+  },
+  {
     id: 'fmp',
-    label: 'Financial Modeling Prep (your key)',
+    label: 'Financial Modeling Prep (browser key or FMP_API_KEY env)',
     powers: 'Live calendar/actuals · Breadth · Cross-asset · recent prints',
     host: 'financialmodelingprep.com',
-    needsKey: true,
+    needsKey: false,
     keyless: false,
-    url: (key) => `https://financialmodelingprep.com/api/v3/quote/SPY?apikey=${key}`,
+    url: (key) => (key ? `https://financialmodelingprep.com/api/v3/quote/SPY?apikey=${key}` : '/api/fmp?p=api%2Fv3%2Fquote%2FSPY'),
     parseSample: (j) => {
       const row = Array.isArray(j) ? (j[0] as Record<string, unknown>) : null;
       const p = n(row?.price);
@@ -152,6 +162,7 @@ export function classifyResult(outcome: { threw: boolean; ok?: boolean; httpStat
   }
   if (outcome.ok) return { status: 'live', detail: 'reachable' };
   const s = outcome.httpStatus ?? 0;
+  if (s === 501) return { status: 'nokey', detail: 'No key anywhere yet — paste one below, or set FMP_API_KEY once on the deployment (Vercel → Settings → Environment Variables) and every device works.' };
   if (s === 401 || s === 403) return { status: 'error', detail: `HTTP ${s} — key rejected or access denied` };
   if (s === 429) return { status: 'error', detail: 'HTTP 429 — rate limited; try again shortly' };
   return { status: 'error', detail: `HTTP ${s || '?'} — endpoint responded with an error` };

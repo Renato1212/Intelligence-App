@@ -678,7 +678,7 @@ export default function Catalysts() {
   const hasKey = !!getMarketApiKey();
   const weekHasToday = today >= ws && today <= addDays(ws, 6);
   useEffect(() => {
-    if (!hasKey) return;
+    // live layer now works keyless (server key or the free weekly feed) — always poll
     let alive = true;
     const pull = async () => {
       const res = await fetchUSCalendarRange(ws, addDays(ws, 6));
@@ -747,16 +747,14 @@ export default function Catalysts() {
                 </span>
               ))}
             </div>
-            {hasKey ? (
-              liveError ? (
-                <span className="muted small">live layer: {liveError}</span>
-              ) : (
-                <span className="muted small">
-                  <span className="grade-dot" style={{ background: 'var(--profit)' }} /> live consensus → actual{weekHasToday ? ', refreshing every minute' : ''}
-                </span>
-              )
+            {liveRows.length ? (
+              <span className="muted small">
+                <span className="grade-dot" style={{ background: 'var(--profit)' }} /> live consensus → actual{weekHasToday ? ', refreshing every minute' : ''}{!hasKey ? ' (keyless feed)' : ''}
+              </span>
+            ) : liveError ? (
+              <span className="muted small">live layer: {liveError}</span>
             ) : (
-              <span className="muted small">connect a free FMP key in Trading Day → Preparation for live consensus &amp; actuals here</span>
+              <span className="muted small">connecting the live layer…</span>
             )}
           </div>
           <div className="stack" style={{ gap: 14 }}>
