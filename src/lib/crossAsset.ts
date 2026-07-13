@@ -8,7 +8,7 @@
  * each asset's trend/volatility state — from daily closes on the trader's
  * free FMP key (ETF proxies, same as the day-ahead briefing).
  */
-import { getMarketApiKey } from './market';
+import { fmpUrls } from './market';
 
 export const CROSS_ASSETS: { symbol: string; label: string; short: string }[] = [
   { symbol: 'SPY', label: 'S&P 500', short: 'SPX' },
@@ -226,7 +226,6 @@ const BREADTH_CACHE_KEY = 'ei-breadth-cache-v1';
 
 /** Cached-first breadth load (sector ETFs + RSP/SPY via the FMP key). */
 export async function loadBreadth(force = false): Promise<{ read: BreadthRead | null; error: string | null }> {
-  const key = getMarketApiKey();
   let cached: CacheShape | null = null;
   try {
     cached = JSON.parse(localStorage.getItem(BREADTH_CACHE_KEY) ?? 'null') as CacheShape | null;
@@ -236,30 +235,30 @@ export async function loadBreadth(force = false): Promise<{ read: BreadthRead | 
   if (!force && cached && Date.now() - new Date(cached.fetchedAt).getTime() < FRESH_MS) {
     return { read: analyzeBreadth(cached.series), error: null };
   }
-  if (!key) {
-    if (cached) return { read: analyzeBreadth(cached.series), error: null };
-    return { read: null, error: 'no-key' };
-  }
   const wanted = [...SECTORS.map((s) => s.symbol), 'RSP', 'SPY'];
   const series: AssetSeries[] = [];
   let lastErr: string | null = null;
   await Promise.all(
     wanted.map(async (symbol) => {
-      const url = `https://financialmodelingprep.com/api/v3/historical-price-full/${symbol}?serietype=line&timeseries=90&apikey=${key}`;
-      try {
-        const res = await fetch(url);
-        if (!res.ok) {
-          lastErr = `Market-data service returned ${res.status}.`;
-          return;
+      for (const url of fmpUrls(`api/v3/historical-price-full/${symbol}?serietype=line&timeseries=90`)) {
+        try {
+          const res = await fetch(url);
+          if (!res.ok) {
+            lastErr = res.status === 501 ? 'no-key' : `Market-data service returned ${res.status}.`;
+            continue;
+          }
+          const raw = (await res.json()) as { historical?: { date?: string; close?: number }[] };
+          const closes = (raw.historical ?? [])
+            .map((h) => ({ date: String(h.date ?? ''), close: Number(h.close) }))
+            .filter((h) => h.date && isFinite(h.close))
+            .sort((x, y) => x.date.localeCompare(y.date));
+          if (closes.length >= 55) {
+            series.push({ symbol, closes });
+            return;
+          }
+        } catch {
+          lastErr = 'Could not reach the market-data service (network/CORS).';
         }
-        const raw = (await res.json()) as { historical?: { date?: string; close?: number }[] };
-        const closes = (raw.historical ?? [])
-          .map((h) => ({ date: String(h.date ?? ''), close: Number(h.close) }))
-          .filter((h) => h.date && isFinite(h.close))
-          .sort((x, y) => x.date.localeCompare(y.date));
-        if (closes.length >= 55) series.push({ symbol, closes });
-      } catch {
-        lastErr = 'Could not reach the market-data service (network/CORS).';
       }
     }),
   );
@@ -293,7 +292,6 @@ interface CacheShape {
 }
 
 export async function loadCrossAsset(force = false): Promise<CrossAssetLoad> {
-  const key = getMarketApiKey();
   let cached: CacheShape | null = null;
   try {
     cached = JSON.parse(localStorage.getItem(CACHE_KEY) ?? 'null') as CacheShape | null;
@@ -303,30 +301,30 @@ export async function loadCrossAsset(force = false): Promise<CrossAssetLoad> {
   if (!force && cached && Date.now() - new Date(cached.fetchedAt).getTime() < FRESH_MS) {
     return { read: analyzeCrossAsset(cached.series), error: null };
   }
-  if (!key) {
-    if (cached) return { read: analyzeCrossAsset(cached.series), error: null, stale: true };
-    return { read: null, error: 'no-key' };
-  }
 
   const series: AssetSeries[] = [];
   let lastErr: string | null = null;
   await Promise.all(
     CROSS_ASSETS.map(async (a) => {
-      const url = `https://financialmodelingprep.com/api/v3/historical-price-full/${a.symbol}?serietype=line&timeseries=140&apikey=${key}`;
-      try {
-        const res = await fetch(url);
-        if (!res.ok) {
-          lastErr = `Market-data service returned ${res.status}.`;
-          return;
+      for (const url of fmpUrls(`api/v3/historical-price-full/${a.symbol}?serietype=line&timeseries=140`)) {
+        try {
+          const res = await fetch(url);
+          if (!res.ok) {
+            lastErr = res.status === 501 ? 'no-key' : `Market-data service returned ${res.status}.`;
+            continue;
+          }
+          const raw = (await res.json()) as { historical?: { date?: string; close?: number }[] };
+          const closes = (raw.historical ?? [])
+            .map((h) => ({ date: String(h.date ?? ''), close: Number(h.close) }))
+            .filter((h) => h.date && isFinite(h.close))
+            .sort((x, y) => x.date.localeCompare(y.date));
+          if (closes.length >= 80) {
+            series.push({ symbol: a.symbol, closes });
+            return;
+          }
+        } catch {
+          lastErr = 'Could not reach the market-data service (network/CORS).';
         }
-        const raw = (await res.json()) as { historical?: { date?: string; close?: number }[] };
-        const closes = (raw.historical ?? [])
-          .map((h) => ({ date: String(h.date ?? ''), close: Number(h.close) }))
-          .filter((h) => h.date && isFinite(h.close))
-          .sort((x, y) => x.date.localeCompare(y.date));
-        if (closes.length >= 80) series.push({ symbol: a.symbol, closes });
-      } catch {
-        lastErr = 'Could not reach the market-data service (network/CORS).';
       }
     }),
   );

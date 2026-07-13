@@ -22,7 +22,6 @@ export function MarketBriefing({ date }: { date: string }) {
   const isToday = date === todayISO();
 
   const refresh = useCallback(async () => {
-    if (!getMarketApiKey()) return;
     setLoading(true);
     try {
       setBriefing(await fetchBriefing(date));
@@ -37,9 +36,10 @@ export function MarketBriefing({ date }: { date: string }) {
   useEffect(() => {
     setBriefing(cachedBriefing(date));
     setError(null);
-    if (hasKey) void refresh();
-    // live view auto-refreshes only for today
-    if (hasKey && isToday) {
+    // the briefing now works keyless (server key or the free weekly feed) —
+    // always attempt; live view auto-refreshes only for today
+    void refresh();
+    if (isToday) {
       const t = setInterval(() => void refresh(), 60000);
       return () => clearInterval(t);
     }
@@ -47,12 +47,11 @@ export function MarketBriefing({ date }: { date: string }) {
 
   const nextEventIdx = useMemo(() => {
     if (!briefing || !isToday) return -1;
-    const now = new Date();
-    const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const hhmm = fmtLisbon(new Date());
     return briefing.events.findIndex((e) => e.time >= hhmm && !e.actual);
   }, [briefing, isToday]);
 
-  if (!hasKey) {
+  if (!hasKey && !briefing?.events.length && !briefing?.quotes.length) {
     return (
       <div className="card">
         <div className="card-title">

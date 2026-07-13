@@ -256,9 +256,15 @@ from the live layer:
   12-month pace (momentum building or fading), 5-year percentile, consecutive-print streaks and a
   print-volatility regime check — condensed into one plain-language insight line, plus **your own
   record** on that event's days from your trade history.
-- **Live consensus → actual** — connect the free FMP key and the week-ahead list carries each
-  event's consensus, refreshing every minute on release days; the actual lands next to it with a
-  deviation arrow the moment it prints. A countdown chip runs on the next scheduled release.
+- **Live consensus → actual, with NO key required** — the week-ahead list carries each event's
+  consensus and previous, refreshing every minute on release days, with the actual landing next to
+  it with a deviation arrow the moment it prints — the same live experience as the popular free
+  calendar sites, because the keyless fallback *is* their weekly feed (relayed by the `/api/ffcal`
+  proxy that ships with the app). Official BLS prints (CPI/NFP/PPI/JOLTS) land via `/api/bls` at
+  release time. Connecting FMP upgrades the layer (full history ranges, more countries): either
+  paste a key in Settings, **or set it once server-side** as a `FMP_API_KEY` environment variable
+  on the deployment (Vercel → Settings → Environment Variables) and every device works with no
+  browser setup — the app relays through its own `/api/fmp`.
 - **Filter the week by domain** — one-tap chips cut the week-ahead to economic data, flow events
   (OPEX, auctions, rebalancing), central banks, or tier-1 only.
 - **Recent prints table** — the last six prints with per-print deltas and the source of each row
