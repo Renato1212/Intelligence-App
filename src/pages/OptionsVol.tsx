@@ -30,6 +30,7 @@ import {
 } from '../lib/options';
 import { Area, AreaChart } from 'recharts';
 import { fmtDateShort, todayISO, weekdayName } from '../lib/format';
+import { fmtLisbon } from '../lib/tz';
 
 const AXIS = { stroke: 'transparent', tick: { fill: '#8a857a', fontSize: 11 }, tickLine: false } as const;
 
@@ -60,7 +61,7 @@ function VixPanel() {
       if (!alive) return;
       if (v.quote) {
         setRegime(vixRegime(v.quote.price, v9.quote?.price ?? null, v3.quote?.price ?? null));
-        setUpdatedAt(new Date().toLocaleTimeString().slice(0, 5));
+        setUpdatedAt(fmtLisbon(Date.now()));
         setError(v9.error || v3.error || null);
       } else {
         setError(v.error);
@@ -361,7 +362,7 @@ function GammaPanel() {
             <span className="small"><span className="grade-dot" style={{ background: 'rgba(12,163,12,0.8)' }} /> net GEX + (dampening)</span>
             <span className="small"><span className="grade-dot" style={{ background: 'rgba(230,103,103,0.85)' }} /> net GEX − (amplifying)</span>
             <span className="muted small" style={{ marginLeft: 'auto' }}>
-              {prof.included.length === 1 ? `expiry ${fmtDateShort(prof.included[0])}` : `${prof.included.length} expiries`} · as of {chain ? new Date(chain.fetchedAt).toLocaleTimeString().slice(0, 5) : ''} (delayed)
+              {prof.included.length === 1 ? `expiry ${fmtDateShort(prof.included[0])}` : `${prof.included.length} expiries`} · as of {chain ? fmtLisbon(chain.fetchedAt) : ''} Lisbon (delayed)
             </span>
           </div>
           {cum.length >= 4 && <CumulativeGexChart cum={cum} spot={prof.spot} flip={prof.zeroGamma} />}
@@ -440,7 +441,7 @@ function ExpiryCalendarPanel() {
             >
               <div className="row" style={{ gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
                 <span className="mono" style={{ fontWeight: 700, width: 86 }}>{weekdayName(e.date).slice(0, 3)} {e.date.slice(5)}</span>
-                <span className="mono muted small" style={{ width: 110 }}>{e.timeET} ET · {localTime(e.instant)} local</span>
+                <span className="mono muted small" style={{ width: 128 }}>{e.timeET} ET · {localTime(e.instant)} Lisbon</span>
                 <b>{e.short}</b>
                 <span className="muted small" style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.name}</span>
                 {e.approx && <span className="chip" style={{ fontSize: 10, padding: '0 5px', color: 'var(--muted)' }}>est.</span>}

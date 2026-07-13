@@ -167,7 +167,7 @@ function SessionRadar({ events }: { events: CalendarEvent[] }) {
   return (
     <div className="card">
       <div className="card-title">
-        Session radar <span className="hint">where the scheduled volatility sits today (local time)</span>
+        Session radar <span className="hint">where the scheduled volatility sits today (Lisbon time)</span>
       </div>
       {inWindow.length === 0 ? (
         <div className="muted small">No tier-1 releases inside the 07:00–17:00 window {events.length ? '(some fall outside it)' : 'today'}.</div>
@@ -720,7 +720,7 @@ export default function Catalysts() {
           <h1 className="page-title">Catalysts</h1>
           <p className="page-sub">
             The scheduled volatility that moves your markets — with the printed history behind every release,
-            live consensus &amp; actuals, and how you actually trade around it. Times in your local zone.
+            live consensus &amp; actuals, and how you actually trade around it. All times in Lisbon (WET/WEST).
           </p>
         </div>
         <div className="row">

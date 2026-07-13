@@ -18,6 +18,7 @@
  */
 
 import { flowEventsForMonth } from './flowCalendar';
+import { fmtLisbon } from './tz';
 
 export type EventImpact = 'high' | 'medium';
 export type EdgeDomain = 'central-banks' | 'economic-data' | 'news' | 'technicals' | 'flow';
@@ -323,8 +324,7 @@ export function upcomingEvents(startISO: string, days = 7): CalendarEvent[] {
     .sort((a, b) => a.instant.localeCompare(b.instant));
 }
 
-/** Render an event's release time in the viewer's local zone as HH:MM. */
+/** Render an event's release time in Lisbon (WET/WEST) as HH:MM. */
 export function localTime(instant: string): string {
-  const d = new Date(instant);
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  return fmtLisbon(instant);
 }

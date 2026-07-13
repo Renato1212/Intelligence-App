@@ -18,6 +18,7 @@ import { analyzeRates, loadRates, ratesInsight, type RatesRead } from '../lib/ra
 import { loadHeadlines, loadNarrative, THEMES, type Headline, type NarrativeLoad, type ThemeSeries } from '../lib/narrative';
 import { cellFor, loadCommodities, loadWeoBoard, weoRead, type CommodityRow, type WeoBoard } from '../lib/imf';
 import { fmtDateShort, todayISO, weekdayName } from '../lib/format';
+import { fmtLisbon } from '../lib/tz';
 
 const AXIS = { stroke: 'transparent', tick: { fill: '#8a857a', fontSize: 11 }, tickLine: false } as const;
 
@@ -400,7 +401,7 @@ function NarrativePanel() {
         </div>
         {load?.fetchedAt && (
           <span className="muted small">
-            {surging.length ? <b style={{ color: 'var(--gold)' }}>{surging.length} surging</b> : 'no surges'} · updated {new Date(load.fetchedAt).toLocaleTimeString().slice(0, 5)}
+            {surging.length ? <b style={{ color: 'var(--gold)' }}>{surging.length} surging</b> : 'no surges'} · updated {fmtLisbon(load.fetchedAt)}
             {load.stale ? ' (cached)' : ''}
           </span>
         )}
