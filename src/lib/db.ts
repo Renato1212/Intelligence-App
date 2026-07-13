@@ -133,3 +133,19 @@ export async function clearAllData(): Promise<void> {
     await Promise.all([db.trades.clear(), db.debriefs.clear(), db.strategies.clear(), db.preps.clear(), db.photos.clear()]);
   });
 }
+
+/**
+ * Delete every trade (and each trade's attached photos), leaving debriefs,
+ * strategies and preparations intact. Uses Collection.delete() rather than
+ * Table.clear() so the per-row `deleting` hook fires — that keeps a signed-in
+ * trader's cloud copy in sync (the deletions propagate) instead of the trades
+ * reappearing on the next pull. Returns how many trades were removed.
+ */
+export async function clearTrades(): Promise<number> {
+  const count = await db.trades.count();
+  await db.transaction('rw', db.trades, db.photos, async () => {
+    await db.photos.filter((p) => p.parentType === 'trade').delete();
+    await db.trades.toCollection().delete();
+  });
+  return count;
+}

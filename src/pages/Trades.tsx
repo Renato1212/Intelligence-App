@@ -1,10 +1,10 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { DomainChip, EmptyState, PnL, SideBadge } from '../components/ui';
+import { DomainChip, EmptyState, PnL, SideBadge, useToast } from '../components/ui';
 import { DOMAINS, categoryLabel } from '../domain/taxonomy';
 import type { Trade } from '../domain/types';
-import { db } from '../lib/db';
+import { clearTrades, db } from '../lib/db';
 import { downloadFile, tradesToCSV } from '../lib/exporters';
 import { fmtDate, fmtDuration, fmtMoney, fmtPct, fmtR, fmtTime, todayISO } from '../lib/format';
 import { computeStats, rMultiple } from '../lib/stats';
@@ -14,6 +14,24 @@ type SortKey = 'time' | 'pnl' | 'instrument';
 export default function Trades() {
   const trades = useLiveQuery(() => db.trades.toArray(), []);
   const nav = useNavigate();
+  const toast = useToast();
+  const [deleting, setDeleting] = useState(false);
+
+  const deleteAllTrades = async () => {
+    const total = trades?.length ?? 0;
+    if (!total || deleting) return;
+    if (!confirm(`Delete ALL ${total} trades? This also removes their attached screenshots and cannot be undone. Debriefs, strategies and preparations are kept.`)) return;
+    if (!confirm('Are you absolutely sure? Tip: Settings → “Download backup” first if you might want them back.')) return;
+    setDeleting(true);
+    try {
+      const n = await clearTrades();
+      toast(`Deleted ${n} trade${n === 1 ? '' : 's'}`);
+    } catch (e) {
+      toast(`Delete failed: ${e instanceof Error ? e.message : e}`);
+    } finally {
+      setDeleting(false);
+    }
+  };
   const [params] = useSearchParams();
   const strategyId = params.get('strategy') ? Number(params.get('strategy')) : null;
   const [domain, setDomain] = useState<string>('');
@@ -115,13 +133,23 @@ export default function Trades() {
             })()}
           </p>
         </div>
-        <button
-          className="btn sm"
-          title="Download the current filtered view as CSV"
-          onClick={() => downloadFile(`trades-export-${todayISO()}.csv`, tradesToCSV(filtered), 'text/csv')}
-        >
-          ⬇ Export CSV ({filtered.length})
-        </button>
+        <div className="row" style={{ gap: 8 }}>
+          <button
+            className="btn sm"
+            title="Download the current filtered view as CSV"
+            onClick={() => downloadFile(`trades-export-${todayISO()}.csv`, tradesToCSV(filtered), 'text/csv')}
+          >
+            ⬇ Export CSV ({filtered.length})
+          </button>
+          <button
+            className="btn sm danger"
+            disabled={deleting}
+            title="Permanently delete every trade (and its screenshots) from your journal"
+            onClick={deleteAllTrades}
+          >
+            {deleting ? 'Deleting…' : `🗑 Delete all trades (${trades?.length ?? 0})`}
+          </button>
+        </div>
       </div>
 
       <div className="card" style={{ marginBottom: 14 }}>
