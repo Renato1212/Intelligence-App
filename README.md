@@ -276,6 +276,23 @@ from the live layer:
   scheduled that period disappear instead of showing as phantoms. Fixed-rule events (NFP incl.
   the July-4th shift, claims, FOMC, ISM, OPEX/witching/rebalancing) are exact.
 
+### Session Clock — the day's structure, live in Lisbon time
+Every time in the app is shown in **Europe/Lisbon** (WET/WEST), regardless of the device's own
+timezone, so the schedule reads the same on any machine. The Session Clock turns that into a live,
+to-the-second view of the trading day:
+
+- **A live clock** in Lisbon with New York (ET), London and UTC alongside.
+- **Every session** — Asia (Tokyo), Europe (London/Frankfurt), US cash equities (NYSE RTH), Metals
+  (COMEX pit), Oil (NYMEX pit) and US Treasuries (CBOT) — each defined in its *own* market timezone
+  (so DST on both sides is always correct) and shown as **open / opens-in / closes-in** with a live
+  progress bar, elapsed time and session length.
+- **A 24-hour timeline** placing every session on the Lisbon day with a live "now" marker, so the
+  **overlaps** are obvious at a glance.
+- **Prime time** — the Europe × US-cash overlap, the deepest-liquidity window of the day — computed
+  live with its own countdown.
+- A **Principle** on timing the day, plus a why/how note on every session (why the window matters
+  and how to trade it) so the map teaches the session playbook while you use it.
+
 ### Live day-ahead briefing
 The preparation page can connect a free market-data key (financialmodelingprep.com) and fills
 itself in every morning: today's tier-1 economic events with consensus and previous prints —

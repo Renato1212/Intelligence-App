@@ -56,7 +56,7 @@ export function DayCatalysts({ date }: { date: string }) {
   return (
     <div className="card">
       <div className="card-title">
-        Scheduled catalysts <span className="hint">free · always on · times in your local zone</span>
+        Scheduled catalysts <span className="hint">free · always on · times in Lisbon (WET/WEST)</span>
       </div>
       {events.length === 0 ? (
         <div className="muted small">

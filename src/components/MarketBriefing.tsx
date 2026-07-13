@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { cachedBriefing, fetchBriefing, getMarketApiKey, setMarketApiKey, type Briefing } from '../lib/market';
 import { todayISO } from '../lib/format';
+import { fmtLisbon } from '../lib/tz';
 import { useToast } from './ui';
 
 const IMPACT_COLOR: Record<string, string> = { High: 'var(--loss)', Medium: 'var(--dom-news)', Low: 'var(--muted)' };
@@ -99,7 +100,7 @@ export function MarketBriefing({ date }: { date: string }) {
       <div className="card-title">
         Live day-ahead briefing{' '}
         <span className="hint row" style={{ gap: 8 }}>
-          {briefing && <span>updated {new Date(briefing.fetchedAt).toLocaleTimeString()}</span>}
+          {briefing && <span>updated {fmtLisbon(briefing.fetchedAt, { seconds: true })} Lisbon</span>}
           {isToday && <span style={{ color: 'var(--profit)' }}>● live</span>}
           <button className="btn sm" onClick={() => void refresh()} disabled={loading}>
             {loading ? 'Refreshing…' : 'Refresh'}
