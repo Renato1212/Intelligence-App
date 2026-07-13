@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useToast } from '../components/ui';
 import { currentUser, fullSync, getSyncState, onSyncState, signIn, signOut, signUp, supabase, type SyncState } from '../lib/cloud';
 import { db } from '../lib/db';
+import { fmtLisbon } from '../lib/tz';
 import { useLiveQuery } from 'dexie-react-hooks';
 
 export default function Account() {
@@ -57,7 +58,7 @@ export default function Account() {
 
   const syncLabel =
     sync.status === 'idle'
-      ? `Synced${sync.lastSync ? ` · ${new Date(sync.lastSync).toLocaleTimeString()}` : ''}`
+      ? `Synced${sync.lastSync ? ` · ${fmtLisbon(sync.lastSync, { seconds: true })}` : ''}`
       : sync.status === 'syncing'
         ? 'Syncing…'
         : sync.status === 'error'

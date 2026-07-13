@@ -1,3 +1,5 @@
+import { fmtLisbon } from './tz';
+
 export function fmtMoney(v: number, opts: { sign?: boolean; compact?: boolean } = {}): string {
   const abs = Math.abs(v);
   let core: string;
@@ -38,9 +40,7 @@ export function fmtDateShort(iso: string): string {
 }
 
 export function fmtTime(iso: string): string {
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return '—';
-  return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  return fmtLisbon(iso, { seconds: true });
 }
 
 export function fmtDuration(entryIso: string, exitIso: string): string {
