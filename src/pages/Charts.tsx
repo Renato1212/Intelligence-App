@@ -22,30 +22,36 @@ import { Principle } from '../components/ui';
 interface ChartSymbol {
   id: string;
   label: string;
-  /** TradingView symbol code */
-  tv: string;
-  group: 'Futures' | 'Cash / real-time';
+  /**
+   * The symbol that always works in free embeds: 24h CFD/index proxies
+   * (OANDA/FX/TVC feeds). TradingView blocks many licensed exchange symbols
+   * (CME/CBOT/NYMEX/COMEX, some cash indices) in free widgets with
+   * "this symbol is only available on TradingView" — the proxy tracks the
+   * same market tick-for-tick in shape.
+   */
+  proxy: string;
+  /** the actual futures contract — may be refused by the free embed */
+  futures?: string;
   note: string;
 }
 
 export const CHART_SYMBOLS: ChartSymbol[] = [
-  { id: 'ES', label: 'ES', tv: 'CME_MINI:ES1!', group: 'Futures', note: 'S&P 500 E-mini — continuous front month' },
-  { id: 'NQ', label: 'NQ', tv: 'CME_MINI:NQ1!', group: 'Futures', note: 'Nasdaq-100 E-mini — continuous front month' },
-  { id: 'RTY', label: 'RTY', tv: 'CME_MINI:RTY1!', group: 'Futures', note: 'Russell 2000 E-mini' },
-  { id: 'YM', label: 'YM', tv: 'CBOT_MINI:YM1!', group: 'Futures', note: 'Dow E-mini' },
-  { id: 'ZN', label: 'ZN', tv: 'CBOT:ZN1!', group: 'Futures', note: '10-year Treasury note — the honest leg on data prints' },
-  { id: 'ZB', label: 'ZB', tv: 'CBOT:ZB1!', group: 'Futures', note: '30-year Treasury bond' },
-  { id: '6E', label: '6E', tv: 'CME:6E1!', group: 'Futures', note: 'Euro FX futures' },
-  { id: 'GC', label: 'GC', tv: 'COMEX:GC1!', group: 'Futures', note: 'Gold futures' },
-  { id: 'CL', label: 'CL', tv: 'NYMEX:CL1!', group: 'Futures', note: 'WTI crude futures' },
-  { id: 'SPX', label: 'SPX', tv: 'SP:SPX', group: 'Cash / real-time', note: 'S&P 500 cash index — real-time timing for ES' },
-  { id: 'NDX', label: 'NDX', tv: 'NASDAQ:NDX', group: 'Cash / real-time', note: 'Nasdaq-100 cash index — real-time timing for NQ' },
-  { id: 'VIX', label: 'VIX', tv: 'TVC:VIX', group: 'Cash / real-time', note: 'Vol regime live — pairs with Options & Vol' },
-  { id: 'DXY', label: 'DXY', tv: 'TVC:DXY', group: 'Cash / real-time', note: 'Dollar index — the cross-asset anchor' },
+  { id: 'ES', label: 'ES', proxy: 'OANDA:SPX500USD', futures: 'CME_MINI:ES1!', note: 'S&P 500 — 24h CFD proxy / E-mini contract' },
+  { id: 'NQ', label: 'NQ', proxy: 'OANDA:NAS100USD', futures: 'CME_MINI:NQ1!', note: 'Nasdaq-100 — 24h CFD proxy / E-mini contract' },
+  { id: 'RTY', label: 'RTY', proxy: 'OANDA:US2000USD', futures: 'CME_MINI:RTY1!', note: 'Russell 2000 — 24h CFD proxy / E-mini contract' },
+  { id: 'YM', label: 'YM', proxy: 'OANDA:US30USD', futures: 'CBOT_MINI:YM1!', note: 'Dow — 24h CFD proxy / E-mini contract' },
+  { id: 'ZN', label: 'ZN', proxy: 'TVC:US10Y', futures: 'CBOT:ZN1!', note: '10-year — yield proxy (moves INVERSE to ZN price) / note contract' },
+  { id: 'ZB', label: 'ZB', proxy: 'TVC:US30Y', futures: 'CBOT:ZB1!', note: '30-year — yield proxy (inverse to price) / bond contract' },
+  { id: '6E', label: '6E', proxy: 'FX:EURUSD', futures: 'CME:6E1!', note: 'Euro — spot EURUSD tracks 6E tick-for-tick' },
+  { id: 'GC', label: 'GC', proxy: 'OANDA:XAUUSD', futures: 'COMEX:GC1!', note: 'Gold — spot XAUUSD proxy / COMEX contract' },
+  { id: 'CL', label: 'CL', proxy: 'TVC:USOIL', futures: 'NYMEX:CL1!', note: 'WTI crude — USOIL proxy / NYMEX contract' },
+  { id: 'VIX', label: 'VIX', proxy: 'TVC:VIX', note: 'Vol regime live — pairs with Options & Vol' },
+  { id: 'DXY', label: 'DXY', proxy: 'TVC:DXY', note: 'Dollar index — the cross-asset anchor' },
 ];
 
 const SYMBOL_KEY = 'ei-chart-symbol';
 const INTERVAL_KEY = 'ei-chart-interval';
+const MODE_KEY = 'ei-chart-mode';
 
 const INTERVALS: { code: string; label: string }[] = [
   { code: '5', label: '5m' },
@@ -149,9 +155,9 @@ const CHART_READS: { title: string; body: string }[] = [
       'The chart loads with session VWAP attached. Above rising VWAP = buyers in control (longs from pullbacks TO it); repeated failures at VWAP after a hot print = the repricing is real. In positive gamma, mean reversion toward VWAP dominates; in negative gamma, VWAP breaks travel.',
   },
   {
-    title: 'Futures are delayed on the free embed — use the cash proxies for timing',
+    title: 'Why the 24h proxy feed is the default',
     body:
-      'CME futures quotes here are ~10 min exchange-delayed. SPX, NDX, VIX and DXY are real-time: watch the cash index for live timing and execute against your broker\'s live futures quote. Levels drawn on ES translate 1:1 to SPX shape (the basis shifts the absolute price, not the structure).',
+      'TradingView licenses exchange data, so free embeds refuse many CME/CBOT symbols. The proxy feeds (SPX500USD, NAS100USD, XAUUSD, USOIL…) are 24h CFD/spot markets that arbitrage against the futures — identical structure, always available, live. Draw levels on the proxy, execute on your broker\'s futures quote; the basis shifts the absolute price, never the shape. Only ZN/ZB differ: their proxies are YIELDS, which move inverse to bond price.',
   },
 ];
 
@@ -160,8 +166,10 @@ const CHART_READS: { title: string; body: string }[] = [
 export default function Charts() {
   const [symId, setSymId] = useState(() => loadPref(SYMBOL_KEY, 'ES'));
   const [interval, setInterval] = useState(() => loadPref(INTERVAL_KEY, '30'));
+  const [mode, setMode] = useState<'proxy' | 'futures'>(() => (loadPref(MODE_KEY, 'proxy') === 'futures' ? 'futures' : 'proxy'));
 
   const sym = CHART_SYMBOLS.find((s) => s.id === symId) ?? CHART_SYMBOLS[0];
+  const tvSymbol = mode === 'futures' && sym.futures ? sym.futures : sym.proxy;
 
   const pick = (id: string) => {
     setSymId(id);
@@ -175,8 +183,12 @@ export default function Charts() {
       localStorage.setItem(INTERVAL_KEY, code);
     } catch { /* private mode */ }
   };
-
-  const groups: ChartSymbol['group'][] = ['Futures', 'Cash / real-time'];
+  const pickMode = (m: 'proxy' | 'futures') => {
+    setMode(m);
+    try {
+      localStorage.setItem(MODE_KEY, m);
+    } catch { /* private mode */ }
+  };
 
   return (
     <div className="stack" style={{ gap: 14 }}>
@@ -194,16 +206,22 @@ export default function Charts() {
           <span className="hint">symbol search inside the chart works too — these chips are the platform&apos;s instruments</span>
         </div>
         <div className="row" style={{ gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
-          {groups.map((g) => (
-            <div key={g} className="row" style={{ gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
-              <span className="tile-label" style={{ marginRight: 2 }}>{g}</span>
-              {CHART_SYMBOLS.filter((s) => s.group === g).map((s) => (
-                <span key={s.id} className={`chip clickable ${s.id === sym.id ? 'selected' : ''}`} onClick={() => pick(s.id)} title={s.note}>
-                  {s.label}
-                </span>
-              ))}
-            </div>
-          ))}
+          <div className="row" style={{ gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+            {CHART_SYMBOLS.map((s) => (
+              <span key={s.id} className={`chip clickable ${s.id === sym.id ? 'selected' : ''}`} onClick={() => pick(s.id)} title={s.note}>
+                {s.label}
+              </span>
+            ))}
+          </div>
+          <div className="row" style={{ gap: 4, alignItems: 'center' }}>
+            <span className="tile-label" style={{ marginRight: 2 }}>Feed</span>
+            <span className={`chip clickable ${mode === 'proxy' ? 'selected' : ''}`} onClick={() => pickMode('proxy')} title="24h CFD/index proxies — always available in the embed, no exchange restrictions">
+              24h proxy
+            </span>
+            <span className={`chip clickable ${mode === 'futures' ? 'selected' : ''}`} onClick={() => pickMode('futures')} title="The actual exchange contract — TradingView may refuse it in free embeds ('only available on TradingView')">
+              Futures
+            </span>
+          </div>
           <div className="row" style={{ gap: 4, marginLeft: 'auto', alignItems: 'center' }}>
             <span className="tile-label" style={{ marginRight: 2 }}>TF</span>
             {INTERVALS.map((iv) => (
@@ -213,10 +231,13 @@ export default function Charts() {
             ))}
           </div>
         </div>
-        <TVAdvancedChart tvSymbol={sym.tv} interval={interval} />
+        <TVAdvancedChart tvSymbol={tvSymbol} interval={interval} />
         <div className="muted small" style={{ marginTop: 8 }}>
-          Data by TradingView. Futures (ES, NQ, ZN…) are exchange-delayed ~10 min on the free embed; SPX / NDX / VIX /
-          DXY update in real time — use them for live timing, the futures chart for levels.
+          Data by TradingView. The <b>24h proxy</b> feed (CFD/spot/index) is always available and tracks the futures
+          tick-for-tick in shape — trade the levels, execute on your broker&apos;s quote. The <b>Futures</b> feed shows
+          the actual contract but TradingView blocks some exchange symbols in free embeds; if you see &quot;only
+          available on TradingView&quot;, flip back to 24h proxy. ZN/ZB proxies are YIELDS — they move inverse to
+          bond prices.
         </div>
       </div>
 
