@@ -14,7 +14,7 @@
  * cached, and shares the calendar row set the rest of the app already pulls.
  */
 import type { PrintPoint } from './econData';
-import { fmpUrls } from './market';
+import { fmpDailyBarUrls, parseFmpDaily } from './market';
 
 export interface DailyClose {
   date: string; // YYYY-MM-DD
@@ -148,8 +148,7 @@ export async function fetchDailyCloses(sym: string, fromISO: string, toISO: stri
   } catch {
     // cache miss is fine
   }
-  const urls = fmpUrls(`api/v3/historical-price-full/${sym}?from=${fromISO}&to=${toISO}&serietype=line`);
-  for (const url of urls) {
+  for (const url of fmpDailyBarUrls(sym, { from: fromISO, to: toISO })) {
     let res: Response;
     try {
       res = await fetch(url);
@@ -163,12 +162,7 @@ export async function fetchDailyCloses(sym: string, fromISO: string, toISO: stri
     } catch {
       continue;
     }
-    const hist = (json as { historical?: { date?: unknown; close?: unknown }[] })?.historical;
-    if (!Array.isArray(hist)) continue;
-    const closes: DailyClose[] = hist
-      .map((h) => ({ date: String(h.date ?? '').slice(0, 10), close: Number(h.close) }))
-      .filter((h) => /^\d{4}-\d{2}-\d{2}$/.test(h.date) && isFinite(h.close) && h.close > 0)
-      .sort((a, b) => a.date.localeCompare(b.date));
+    const closes: DailyClose[] = parseFmpDaily(json).map((b) => ({ date: b.date, close: b.close }));
     if (closes.length < 5) continue;
     try {
       localStorage.setItem(PX_CACHE + sym, JSON.stringify({ at: Date.now(), from: fromISO, closes }));

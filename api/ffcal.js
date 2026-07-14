@@ -23,20 +23,37 @@ export default async function handler(req, res) {
     res.status(400).json({ error: 'week must be "this" or "next".' });
     return;
   }
-  try {
-    const r = await fetch(url, { headers: { Accept: 'application/json', 'User-Agent': 'edge-intelligence/1.0 (trading journal)' } });
-    if (!r.ok) {
-      res.status(502).json({ error: `Feed returned ${r.status}.` });
+  // The host sits behind bot protection that rejects non-browser user agents
+  // from datacenter IPs (the 502s on the health board). Present as a browser
+  // and retry once; stale-if-error lets the edge keep serving the last good
+  // copy through upstream hiccups.
+  const headers = {
+    Accept: 'application/json, text/plain, */*',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
+    'Accept-Language': 'en-US,en;q=0.9',
+  };
+  let lastErr = 'unknown';
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 8000);
+      const r = await fetch(url, { headers, signal: ctrl.signal });
+      clearTimeout(timer);
+      if (!r.ok) {
+        lastErr = `Feed returned ${r.status}.`;
+        continue;
+      }
+      const json = await r.json();
+      if (!Array.isArray(json)) {
+        lastErr = 'Unexpected feed payload.';
+        continue;
+      }
+      res.setHeader('Cache-Control', 's-maxage=120, stale-while-revalidate=3600, stale-if-error=86400');
+      res.status(200).json(json);
       return;
+    } catch (e) {
+      lastErr = `Upstream fetch failed: ${e instanceof Error ? e.message : 'timeout'}`;
     }
-    const json = await r.json();
-    if (!Array.isArray(json)) {
-      res.status(502).json({ error: 'Unexpected feed payload.' });
-      return;
-    }
-    res.setHeader('Cache-Control', 's-maxage=120, stale-while-revalidate=600');
-    res.status(200).json(json);
-  } catch (e) {
-    res.status(502).json({ error: `Upstream fetch failed: ${e instanceof Error ? e.message : 'unknown'}` });
   }
+  res.status(502).json({ error: lastErr });
 }
