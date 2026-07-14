@@ -334,6 +334,19 @@ contract where the embed allows it. A teaching block explains how to combine the
 other sections (draw the dealer levels from Options & Vol, time-stamp the session opens and
 release times, use VWAP as fair value) and why the ZN/ZB yield proxies move inverse to price.
 
+### Trading connection — Rithmic (Settings)
+Rithmic's **R | Protocol API** is WebSockets + protocol buffers and is designed to run in web
+browsers, so the app can talk to the R | Trade Execution Platform directly. What Rithmic gates is
+*access*: request API access (rithmic.com/api-request or through your broker / prop firm), build
+against their **Test** system with the dev kit, pass conformance review, then receive a registered
+system name + production credentials. The Settings panel implements everything around that path
+today: a **credentials vault that lives on this device only** (packed at rest, never cloud-synced,
+excluded from backups and cache clears), the Test / Paper / Production environment model (Test
+gateway prefilled; production ships no fake defaults), a **wss:// gateway reachability probe**, and
+a four-step readiness checklist that always tells you which step of Rithmic's real onboarding
+you're on — the final protobuf login/market-data/order plants plug in the moment the dev kit's
+proto definitions are available. Until then, R Trader Pro's export → Import keeps fills flowing.
+
 ### Live day-ahead briefing
 The preparation page can connect a free market-data key (financialmodelingprep.com) and fills
 itself in every morning: today's tier-1 economic events with consensus and previous prints —

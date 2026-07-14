@@ -15,6 +15,149 @@ import {
   type SourceResult,
   type SourceStatus,
 } from '../lib/dataSources';
+import {
+  connectionReadiness,
+  loadConn,
+  probeGateway,
+  RITHMIC_ENVS,
+  saveConn,
+  type ProbeResult,
+  type RithmicConn,
+} from '../lib/rithmic';
+
+function RithmicConnection() {
+  const toast = useToast();
+  const saved = loadConn();
+  const [user, setUser] = useState(saved?.user ?? '');
+  const [password, setPassword] = useState(saved?.password ?? '');
+  const [env, setEnv] = useState<RithmicConn['env']>(saved?.env ?? 'test');
+  const [gatewayUrl, setGatewayUrl] = useState(saved?.gatewayUrl ?? RITHMIC_ENVS[0].defaultUrl);
+  const [systemName, setSystemName] = useState(saved?.systemName ?? '');
+  const [probe, setProbe] = useState<ProbeResult | null>(null);
+  const [probing, setProbing] = useState(false);
+
+  const current = (): RithmicConn => ({ user, password, systemName, env, gatewayUrl });
+  const steps = connectionReadiness(user || password || gatewayUrl ? current() : loadConn());
+
+  const pickEnv = (id: RithmicConn['env']) => {
+    setEnv(id);
+    // each environment starts from ITS default gateway — including the honest
+    // empty one for paper/production (those addresses come from the dev kit)
+    setGatewayUrl(RITHMIC_ENVS.find((e) => e.id === id)!.defaultUrl);
+    setProbe(null);
+  };
+
+  const save = () => {
+    if (!user.trim() && !password.trim()) {
+      saveConn(null);
+      toast('Rithmic connection removed from this device');
+      return;
+    }
+    saveConn(current());
+    toast('Rithmic connection saved — on this device only');
+  };
+
+  const runProbe = async () => {
+    setProbing(true);
+    try {
+      setProbe(await probeGateway(gatewayUrl.trim()));
+    } finally {
+      setProbing(false);
+    }
+  };
+
+  const envMeta = RITHMIC_ENVS.find((e) => e.id === env)!;
+
+  return (
+    <div className="card">
+      <div className="card-title">
+        Trading connection — Rithmic{' '}
+        <span className="hint">R | Protocol API runs in the browser (WebSockets + protobuf) — access is what Rithmic gates, and this panel walks that path</span>
+      </div>
+
+      <div className="stack" style={{ gap: 8, marginBottom: 12 }}>
+        {steps.map((s, i) => (
+          <div key={s.step} className="row" style={{ gap: 10, alignItems: 'flex-start' }}>
+            <span
+              className="grade-dot"
+              style={{ background: s.done ? 'var(--profit)' : 'var(--muted)', marginTop: 4, flexShrink: 0 }}
+            />
+            <div>
+              <div className="small" style={{ fontWeight: 600 }}>{i + 1}. {s.step}</div>
+              <div className="muted small">{s.detail}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="row" style={{ gap: 4, flexWrap: 'wrap', marginBottom: 8, alignItems: 'center' }}>
+        <span className="tile-label" style={{ marginRight: 4 }}>Environment</span>
+        {RITHMIC_ENVS.map((e) => (
+          <span key={e.id} className={`chip clickable ${env === e.id ? 'selected' : ''}`} onClick={() => pickEnv(e.id)} title={e.note}>
+            {e.label}
+          </span>
+        ))}
+      </div>
+      <div className="muted small" style={{ marginBottom: 10 }}>{envMeta.note}</div>
+
+      <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+        <input
+          value={user}
+          onChange={(e) => setUser(e.target.value)}
+          placeholder="Rithmic user id"
+          autoComplete="off"
+          style={{ flex: '1 1 180px', minWidth: 160, padding: '8px 10px', background: 'var(--surface)', border: '1px solid var(--hairline)', borderRadius: 6, color: 'var(--text)' }}
+        />
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="password (stays on this device)"
+          autoComplete="new-password"
+          style={{ flex: '1 1 180px', minWidth: 160, padding: '8px 10px', background: 'var(--surface)', border: '1px solid var(--hairline)', borderRadius: 6, color: 'var(--text)' }}
+        />
+      </div>
+      <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+        <input
+          value={gatewayUrl}
+          onChange={(e) => { setGatewayUrl(e.target.value); setProbe(null); }}
+          placeholder="wss:// gateway (from your dev kit / broker)"
+          autoComplete="off"
+          style={{ flex: '2 1 260px', minWidth: 220, padding: '8px 10px', background: 'var(--surface)', border: '1px solid var(--hairline)', borderRadius: 6, color: 'var(--text)' }}
+        />
+        <input
+          value={systemName}
+          onChange={(e) => setSystemName(e.target.value)}
+          placeholder={env === 'test' ? 'system name (default: Rithmic Test)' : 'registered system name'}
+          autoComplete="off"
+          style={{ flex: '1 1 180px', minWidth: 180, padding: '8px 10px', background: 'var(--surface)', border: '1px solid var(--hairline)', borderRadius: 6, color: 'var(--text)' }}
+        />
+      </div>
+
+      <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <button className="btn primary" onClick={save}>{user.trim() || password.trim() ? 'Save on this device' : 'Remove saved connection'}</button>
+        <button className="btn" disabled={probing || !gatewayUrl.trim()} onClick={() => void runProbe()}>
+          {probing ? 'Testing…' : 'Test gateway reachability'}
+        </button>
+        {probe && (
+          <span className="small" style={{ color: probe.reachable ? 'var(--profit)' : 'var(--loss)' }}>
+            {probe.reachable ? `Reachable · ${probe.latencyMs}ms` : probe.detail}
+          </span>
+        )}
+      </div>
+
+      <div className="muted small" style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--hairline)' }}>
+        <b>The honest map:</b> your credentials are stored on this device only (never cloud-synced, excluded from
+        backups and cache clears). The browser can already reach Rithmic gateways — the production login handshake
+        additionally needs the R&nbsp;|&nbsp;Protocol dev kit and a conformance-registered system name from Rithmic
+        (request at rithmic.com/api-request, or ask your broker / prop firm to enable API access on your login; prop
+        logins are often locked to the firm's platforms until they enable it). Until then, your fills flow in today
+        via R&nbsp;Trader&nbsp;Pro's export → the Import page, and every market study here runs alongside whatever
+        platform executes.
+      </div>
+    </div>
+  );
+}
 
 const STATUS_META: Record<SourceStatus, { color: string; label: string }> = {
   live: { color: 'var(--profit)', label: 'Live' },
@@ -192,6 +335,8 @@ export default function Settings() {
 
       <div className="stack">
         <DataConnections />
+
+        <RithmicConnection />
 
         <div className="card">
           <div className="card-title">Your data</div>
