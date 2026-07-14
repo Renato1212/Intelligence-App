@@ -16,6 +16,7 @@
  * unit-testable offline.
  */
 import { fmpUrls, type LiveEventRow } from './market';
+import { fetchFfRows } from './ffcal';
 import type { IndicatorSpec, PrintPoint } from './econData';
 
 /* ------------------------- matching & attribution ------------------------ */
@@ -32,10 +33,12 @@ interface LiveMatcher {
 
 /** Provider event-name → indicator mapping (covers FMP's two naming styles). */
 export const LIVE_PRINT_MATCHERS: Record<string, LiveMatcher> = {
-  'nfp-payrolls': { test: /non.?farm payrolls/i, reject: /private|manufactur|revis/i, min: -25000, max: 25000 },
+  // both provider styles: "Non Farm Payrolls" (FMP) / "Non-Farm Employment Change" (weekly feed)
+  'nfp-payrolls': { test: /non.?farm payrolls|non.?farm employment change/i, reject: /private|manufactur|revis/i, min: -25000, max: 25000 },
   'nfp-unemployment': { test: /unemployment rate/i, reject: /u-?6|youth|long/i, min: 0, max: 30 },
   'nfp-ahe': { test: /average hourly earnings/i, reject: /yoy|y\/y/i, min: -2, max: 3 },
   'cpi-headline': { test: /(inflation rate|cpi)\s*(mom|m\/m)/i, reject: /core|median|trimmed/i, min: -3, max: 3 },
+  'cpi-yoy': { test: /(inflation rate|cpi)\s*(yoy|y\/y)/i, reject: /core|median|trimmed/i, min: -3, max: 25 },
   'cpi-core': { test: /core (inflation rate|cpi)\s*(mom|m\/m)/i, min: -3, max: 3 },
   'cpi-core-yoy': { test: /core (inflation rate|cpi)\s*(yoy|y\/y)/i, min: -2, max: 20 },
   'ppi-fd': { test: /(ppi|producer price)/i, reject: /core|yoy|y\/y|input|services/i, min: -5, max: 5 },
@@ -102,6 +105,56 @@ export function recentPrintsFromRows(indicatorId: string, rows: LiveEventRow[]):
   return [...byPeriod.entries()]
     .map(([period, v]) => ({ period, value: v.value }))
     .sort((a, b) => a.period.localeCompare(b.period));
+}
+
+/* -------------------------------- archive -------------------------------- */
+
+const ARCHIVE_KEY = 'ei-print-archive-v1';
+
+type Archive = Record<string, PrintPoint[]>;
+
+function archiveLoad(): Archive {
+  try {
+    const a = JSON.parse(localStorage.getItem(ARCHIVE_KEY) ?? '{}') as Archive;
+    return a && typeof a === 'object' ? a : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Persist prints per indicator and return the union (by period, newest value
+ * wins), capped to the last 60 points. This is how series WITHOUT a working
+ * free mirror (ISM, PCE, Retail — and any series while no FMP key is
+ * connected) accumulate real history over time: every actual the keyless
+ * weekly feed or the FMP calendar ever shows gets remembered locally.
+ * Safe without localStorage (SSR/tests): falls back to a pure union.
+ */
+export function archiveMerge(indicatorId: string, points: PrintPoint[]): PrintPoint[] {
+  let stored: PrintPoint[] = [];
+  let canPersist = true;
+  try {
+    stored = archiveLoad()[indicatorId] ?? [];
+  } catch {
+    canPersist = false;
+  }
+  const byPeriod = new Map<string, number>();
+  for (const p of stored) byPeriod.set(p.period, p.value);
+  for (const p of points) byPeriod.set(p.period, p.value);
+  const merged = [...byPeriod.entries()]
+    .map(([period, value]) => ({ period, value }))
+    .sort((a, b) => a.period.localeCompare(b.period))
+    .slice(-60);
+  if (canPersist && points.length) {
+    try {
+      const a = archiveLoad();
+      a[indicatorId] = merged;
+      localStorage.setItem(ARCHIVE_KEY, JSON.stringify(a));
+    } catch {
+      // best effort
+    }
+  }
+  return merged;
 }
 
 /* --------------------------------- merge --------------------------------- */
@@ -239,7 +292,12 @@ export async function getHistoricalRows(monthsBack: number): Promise<LiveEventRo
       if (end >= now) break;
       cursor = new Date(end.getTime() + 86400000);
     }
-    if (!anyOk) return null;
+    if (!anyOk) {
+      // no FMP anywhere — the keyless weekly feed still carries this week's
+      // (and next week's) rows with actuals; the archive makes them add up
+      const ff = await fetchFfRows();
+      return ff.length ? ff : null;
+    }
     const cache: RowsCache = { fetchedAt: new Date().toISOString(), from: fromISO, to: toISO, rows };
     rowsMemo = cache;
     try {
@@ -256,9 +314,13 @@ export async function getHistoricalRows(monthsBack: number): Promise<LiveEventRo
   }
 }
 
-/** Recent live prints for one indicator, covering at least the given gap. */
+/**
+ * Recent live prints for one indicator, covering at least the given gap —
+ * unioned with the local archive, so every print the app has EVER seen keeps
+ * counting (this is what builds keyless history for ISM/PCE/Retail over time).
+ */
 export async function fetchRecentPrints(spec: IndicatorSpec, gapMonths: number): Promise<PrintPoint[]> {
   const rows = await getHistoricalRows(gapMonths + 3);
-  if (!rows) return [];
-  return recentPrintsFromRows(spec.id, rows);
+  const fresh = rows ? recentPrintsFromRows(spec.id, rows) : [];
+  return archiveMerge(spec.id, fresh);
 }

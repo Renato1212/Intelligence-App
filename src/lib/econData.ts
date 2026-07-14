@@ -54,6 +54,12 @@ export const INDICATORS: IndicatorSpec[] = [
     sources: [{ provider: 'BLS', dataset: 'cu', series: 'CUSR0000SA0' }, { provider: 'BLS', dataset: 'CU', series: 'CUSR0000SA0' }],
   },
   {
+    // the headline year-over-year print the market quotes ("inflation is 2.4%").
+    // BLS publishes the official YoY off the NSA index (CUUR…), not the SA one.
+    id: 'cpi-yoy', eventShort: 'CPI', label: 'CPI headline YoY', unit: '% y/y', transform: 'pct12', decimals: 1,
+    sources: [{ provider: 'BLS', dataset: 'cu', series: 'CUUR0000SA0' }, { provider: 'BLS', dataset: 'CU', series: 'CUUR0000SA0' }],
+  },
+  {
     id: 'cpi-core', eventShort: 'CPI', label: 'Core CPI', unit: '% m/m', transform: 'pct1', decimals: 2,
     sources: [{ provider: 'BLS', dataset: 'cu', series: 'CUSR0000SA0L1E' }, { provider: 'BLS', dataset: 'CU', series: 'CUSR0000SA0L1E' }],
   },
@@ -265,7 +271,7 @@ export function indicatorInsight(spec: IndicatorSpec, stats: PrintStats): string
 /* ------------------------------- fetching ------------------------------- */
 
 const API = 'https://api.db.nomics.world/v22/series';
-const CACHE_KEY = 'ei-econ-cache-v4'; // v4: BLS-proxy tail merged onto mirror history
+const CACHE_KEY = 'ei-econ-cache-v5'; // v5: JOLTS id fix + print archive
 const FRESH_MS = 20 * 3600 * 1000;
 
 interface CacheShape {

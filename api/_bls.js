@@ -38,10 +38,11 @@ export function parseBlsResults(json) {
   return out;
 }
 
-/** Sanitize the caller's ?series= into a safe, de-duped BLS id list (max 25). */
+/** Sanitize the caller's ?series= into a safe, de-duped BLS id list (max 25).
+ * Length cap is 25: JOLTS ids are 21 chars (JTS000000000000000JOL). */
 export function cleanSeriesParam(raw) {
   return [...new Set(String(raw || '')
     .split(',')
     .map((s) => s.trim())
-    .filter((s) => /^[A-Za-z0-9]{6,20}$/.test(s)))].slice(0, 25);
+    .filter((s) => /^[A-Za-z0-9]{6,25}$/.test(s)))].slice(0, 25);
 }
