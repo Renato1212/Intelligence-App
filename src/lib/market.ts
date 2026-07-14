@@ -228,6 +228,10 @@ export interface LiveEventRow {
   actual: string | null;
   /** optional release instant (ISO), when the source carries a time */
   instant?: string;
+  /** optional impact tag from the source (High / Medium / Low / Holiday) */
+  impact?: string;
+  /** optional currency code (USD, EUR …) when the source is multi-currency */
+  currency?: string;
 }
 
 /* Cached provider rows per fetched range, so date reconciliation (reconcile.ts)

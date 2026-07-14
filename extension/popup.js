@@ -1,68 +1,97 @@
-/* Edge Capture popup — the toolbar-icon UI. Talks to the background aggregator. */
+/*
+ * Edge Capture v2 — simple, reliable: read the VISIBLE trading tables.
+ *
+ * The old version tried to intercept Trader One's live WebSocket fills; that
+ * produced huge diagnostic files without clean fills. This version does the
+ * robust thing instead: it reads the rows of whatever grid/table is on screen
+ * (orders, fills, trade history) across all frames, keeps only lines that look
+ * like trading rows (a time and a price), and hands them to you as clean text
+ * that Edge Intelligence's Import-paste understands (it splits fills into
+ * trades automatically).
+ */
 (function () {
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
+  var out = $('out');
+  var status = $('status');
 
-  function setStatus(msg, warn) {
-    var el = $('status');
-    el.textContent = msg || '';
-    el.className = 'hint' + (warn ? ' warn' : '');
-  }
-
-  function refresh() {
-    chrome.runtime.sendMessage({ type: 'ei/stats' }, function (s) {
-      if (chrome.runtime.lastError || !s) { setStatus('Background not ready — reopen this popup.', true); return; }
-      $('count').textContent = s.fills + (s.fills === 1 ? ' fill' : ' fills');
-      $('ws').textContent = s.ws;
-      $('wsbin').textContent = s.wsbin;
-      $('req').textContent = s.requests;
-      $('workers').textContent = s.workers;
-      var total = s.ws + s.wsbin + s.requests;
-      if (total === 0 && s.workers > 0) {
-        $('sub').textContent = 'No page traffic — data likely in a Worker.';
-        setStatus(s.workers + ' worker(s) detected but no page-level socket. Use Download diagnostic and send it to support.', true);
-      } else if (total === 0) {
-        $('sub').textContent = 'Waiting for trading traffic…';
-        setStatus('Enable BEFORE the page loads, then place or view a trade.', false);
-      } else {
-        $('sub').textContent = 'Recording while you trade.';
-        setStatus('', false);
-      }
+  // Runs INSIDE the page (every frame): harvest grid/table row text.
+  function scrapeRows() {
+    var lines = [];
+    var seen = Object.create(null);
+    function push(cells) {
+      var txt = cells
+        .map(function (c) { return (c.innerText || '').replace(/\s+/g, ' ').trim(); })
+        .filter(Boolean)
+        .join('\t');
+      if (txt.length < 6) return;
+      if (seen[txt]) return;
+      seen[txt] = 1;
+      lines.push(txt);
+    }
+    // classic tables
+    document.querySelectorAll('table tr').forEach(function (tr) {
+      push(Array.prototype.slice.call(tr.querySelectorAll('td,th')));
     });
+    // ag-grid / ARIA grids (Trader One uses div-based grids)
+    document.querySelectorAll('[role="row"], .ag-row').forEach(function (row) {
+      var cells = row.querySelectorAll('[role="gridcell"], [role="columnheader"], .ag-cell');
+      if (cells.length) push(Array.prototype.slice.call(cells));
+    });
+    return lines;
   }
 
-  function download(name, text) {
-    try {
-      var blob = new Blob([text], { type: 'application/json' });
-      var a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = name;
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(function () { a.remove(); URL.revokeObjectURL(a.href); }, 2000);
-    } catch (e) {}
+  // Keep only rows that plausibly describe an order/fill: a clock time AND a
+  // decimal price-ish number. Headers and UI chrome fall away.
+  function looksLikeTradeRow(line) {
+    var hasTime = /\b\d{1,2}:\d{2}(:\d{2})?\b/.test(line);
+    var hasPrice = /\b\d{2,6}([.,']\d{1,4})\b/.test(line);
+    return hasTime && hasPrice;
   }
 
-  $('export').addEventListener('click', function () {
-    chrome.runtime.sendMessage({ type: 'ei/dump' }, function (r) {
-      if (chrome.runtime.lastError || !r) { setStatus('Export failed — reload Trader One and retry.', true); return; }
-      download('edge-capture-' + new Date().toISOString().slice(0, 10) + '.json', JSON.stringify(r.payload));
-      setStatus('Exported ' + (r.fills ? r.fills.length : 0) + ' fills. Import the file in Edge Intelligence.', false);
+  function setStatus(msg, err) {
+    status.textContent = msg;
+    status.className = err ? 'err' : '';
+  }
+
+  $('capture').addEventListener('click', function () {
+    setStatus('Reading tables…');
+    chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
+      var tab = tabs && tabs[0];
+      if (!tab || !tab.id) return setStatus('No active tab.', true);
+      chrome.scripting.executeScript(
+        { target: { tabId: tab.id, allFrames: true }, func: scrapeRows },
+        function (results) {
+          if (chrome.runtime.lastError) return setStatus(chrome.runtime.lastError.message, true);
+          var all = [];
+          (results || []).forEach(function (r) { if (r && r.result) all = all.concat(r.result); });
+          var rows = all.filter(looksLikeTradeRow);
+          var text = rows.join('\n');
+          out.value = text;
+          $('copy').disabled = $('download').disabled = !rows.length;
+          if (!rows.length) {
+            setStatus('No trading rows visible — open the panel that shows your orders/fills table (scroll it into view) and capture again. Raw rows seen: ' + all.length + '.', true);
+            return;
+          }
+          navigator.clipboard.writeText(text).then(
+            function () { setStatus('Captured ' + rows.length + ' rows — copied to clipboard. Paste into Import.'); },
+            function () { setStatus('Captured ' + rows.length + ' rows. Use Copy below.'); }
+          );
+        }
+      );
     });
   });
 
-  $('diag').addEventListener('click', function () {
-    chrome.runtime.sendMessage({ type: 'ei/diag' }, function (r) {
-      if (chrome.runtime.lastError || !r) { setStatus('Diagnostic failed — reload Trader One and retry.', true); return; }
-      download('edge-capture-diagnostic-' + new Date().toISOString().slice(0, 10) + '.json', JSON.stringify(r.payload, null, 2));
-      setStatus('Diagnostic downloaded — send this file to support to add your fill format.', false);
-    });
+  $('copy').addEventListener('click', function () {
+    navigator.clipboard.writeText(out.value).then(function () { setStatus('Copied.'); });
   });
 
-  $('clear').addEventListener('click', function () {
-    chrome.runtime.sendMessage({ type: 'ei/clear' }, function () { refresh(); setStatus('Cleared. Recording fresh.', false); });
+  $('download').addEventListener('click', function () {
+    var blob = new Blob([out.value], { type: 'text/plain' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'trader-one-' + new Date().toISOString().slice(0, 10) + '.txt';
+    a.click();
+    URL.revokeObjectURL(a.href);
   });
-
-  refresh();
-  setInterval(refresh, 1200);
 })();

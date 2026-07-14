@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Connects } from '../components/Connects';
 import {
   Bar,
   BarChart,
@@ -577,6 +578,7 @@ export default function OptionsVol() {
         <VixPanel />
         <GammaPanel />
         <ExpiryCalendarPanel />
+        <Connects id="optvol" />
         <SessionFlowPanel />
       </div>
     </>

@@ -1,30 +1,14 @@
 {
   "manifest_version": 3,
-  "name": "Edge Capture — Trader One fills",
-  "version": "1.1.0",
-  "description": "Records your live fills (size, price, market/limit) from Trader One in real time and exports them to the Edge Intelligence platform.",
-  "permissions": ["storage"],
+  "name": "Edge Capture — Trader One",
+  "version": "2.0.0",
+  "description": "One click copies your visible Trader One trading data (orders/fills tables) as clean text, ready to paste into Edge Intelligence → Import.",
+  "permissions": ["activeTab", "scripting", "clipboardWrite"],
   "host_permissions": ["https://trader.axiafutures.com/*"],
-  "background": { "service_worker": "background.js" },
   "action": {
     "default_title": "Edge Capture",
     "default_popup": "popup.html",
     "default_icon": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" }
   },
-  "icons": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" },
-  "content_scripts": [
-    {
-      "matches": ["https://trader.axiafutures.com/*"],
-      "js": ["inject.js"],
-      "run_at": "document_start",
-      "world": "MAIN",
-      "all_frames": true
-    },
-    {
-      "matches": ["https://trader.axiafutures.com/*"],
-      "js": ["content.js"],
-      "run_at": "document_start",
-      "all_frames": true
-    }
-  ]
+  "icons": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" }
 }
