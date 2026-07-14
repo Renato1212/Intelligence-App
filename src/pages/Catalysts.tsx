@@ -1,4 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks';
+import { Connects } from '../components/Connects';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -36,6 +37,7 @@ import { staleGapMonths } from '../lib/econLive';
 import { loadReleaseDetail, RELEASE_DETAILS, type ReleaseDetailLoad } from '../lib/releaseDetail';
 import { eventDaySplit, perEventStats, proximitySplit, type PerEventStat } from '../lib/eventStats';
 import { fetchUSCalendarRange, getMarketApiKey, liveReadingsFor, parseReading, type LiveEventRow } from '../lib/market';
+import { fetchFfRows } from '../lib/ffcal';
 import { addDays, fmtMoney, todayISO, weekdayName } from '../lib/format';
 
 /** Monday of the week containing `iso`. */
@@ -626,6 +628,122 @@ function ReleaseIntel({ record, now }: { record: PerEventStat[]; now: number }) 
   );
 }
 
+/* --------------------------- full live-feed week -------------------------- */
+
+const FEED_IMPACT: Record<string, string> = { High: 'var(--loss)', Medium: 'var(--dom-news)', Low: 'var(--muted)', Holiday: 'var(--gold)' };
+const FEED_CURRENCIES = ['USD', 'EUR', 'GBP', 'JPY'];
+
+/**
+ * The complete calendar, ForexFactory-style: EVERY event from the keyless
+ * weekly feed (not just the curated tier-1 set) with impact, Lisbon time and
+ * consensus → actual, refreshing every minute on trading days.
+ */
+function FullWeekFeed({ ws, today }: { ws: string; today: string }) {
+  const [rows, setRows] = useState<LiveEventRow[]>([]);
+  const [failed, setFailed] = useState(false);
+  const [minImpact, setMinImpact] = useState<'all' | 'med' | 'high'>('med');
+  const [openDay, setOpenDay] = useState<string | null>(today);
+
+  useEffect(() => {
+    let alive = true;
+    const pull = async () => {
+      const r = await fetchFfRows(FEED_CURRENCIES);
+      if (!alive) return;
+      if (r.length) {
+        setRows(r);
+        setFailed(false);
+      } else setFailed(true);
+    };
+    void pull();
+    const id = window.setInterval(pull, 60000);
+    return () => {
+      alive = false;
+      window.clearInterval(id);
+    };
+  }, []);
+
+  const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(ws, i)), [ws]);
+  const passes = (r: LiveEventRow) =>
+    minImpact === 'all' ? true : minImpact === 'med' ? r.impact === 'High' || r.impact === 'Medium' : r.impact === 'High';
+  const byDay = useMemo(() => {
+    const m = new Map<string, LiveEventRow[]>();
+    for (const r of rows) {
+      if (!passes(r)) continue;
+      if (!m.has(r.date)) m.set(r.date, []);
+      m.get(r.date)!.push(r);
+    }
+    for (const list of m.values()) list.sort((a, b) => (a.instant ?? '').localeCompare(b.instant ?? ''));
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, minImpact]);
+
+  return (
+    <div className="card">
+      <div className="spread" style={{ alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+        <div className="card-title" style={{ marginBottom: 0 }}>
+          Full calendar — live feed <span className="hint">every scheduled event (USD·EUR·GBP·JPY), keyless, refreshing every minute · times in Lisbon</span>
+        </div>
+        <div className="row" style={{ gap: 4 }}>
+          {([['high', 'High only'], ['med', 'Med+'], ['all', 'All']] as const).map(([id, label]) => (
+            <span key={id} className={`chip clickable ${minImpact === id ? 'selected' : ''}`} onClick={() => setMinImpact(id)}>{label}</span>
+          ))}
+        </div>
+      </div>
+
+      {failed && !rows.length ? (
+        <div className="muted small">The live feed is served by your deployment (/api/ffcal) — unavailable in local dev, live on the site.</div>
+      ) : !rows.length ? (
+        <div className="muted small">Loading the week's feed…</div>
+      ) : (
+        <div className="stack" style={{ gap: 8 }}>
+          {days.map((d) => {
+            const evs = byDay.get(d) ?? [];
+            const open = openDay === d;
+            const isToday = d === today;
+            return (
+              <div key={d}>
+                <div
+                  className="spread"
+                  style={{ cursor: 'pointer', padding: '4px 2px', borderBottom: '1px solid var(--hairline)' }}
+                  onClick={() => setOpenDay(open ? null : d)}
+                >
+                  <span className="row" style={{ gap: 8, alignItems: 'baseline' }}>
+                    <b style={{ color: isToday ? 'var(--gold)' : undefined }}>{open ? '▾' : '▸'} {weekdayName(d)}</b>
+                    <span className="muted small">{d.slice(5)}</span>
+                    {isToday && <span className="chip" style={{ background: 'var(--gold)', color: '#141210', fontSize: 10 }}>today</span>}
+                  </span>
+                  <span className="muted small">{evs.length ? `${evs.length} events` : 'quiet'}</span>
+                </div>
+                {open && evs.length > 0 && (
+                  <div className="stack" style={{ gap: 2, marginTop: 4 }}>
+                    {evs.map((r, i) => (
+                      <div key={`${r.name}-${i}`} className="row" style={{ gap: 8, alignItems: 'baseline', padding: '3px 2px', flexWrap: 'wrap' }}>
+                        <span className="mono small" style={{ width: 42, fontWeight: 700 }}>{r.instant ? localTime(r.instant) : '—'}</span>
+                        <span className="grade-dot" style={{ background: FEED_IMPACT[r.impact ?? ''] ?? 'var(--muted)', flexShrink: 0 }} />
+                        <span className="mono small muted" style={{ width: 30 }}>{r.currency}</span>
+                        <span className="small" style={{ minWidth: 0, flex: 1 }}>{r.name}</span>
+                        <span className="mono small muted" title="consensus">{r.consensus ?? '—'}</span>
+                        <span className="mono small" style={{ color: r.actual ? 'var(--gold)' : 'var(--muted)' }} title="actual">
+                          {r.actual ? `→ ${r.actual}` : '→ …'}
+                        </span>
+                        <span className="mono small muted" title="previous">prev {r.previous ?? '—'}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          <div className="muted small" style={{ marginTop: 4 }}>
+            Red = high impact, orange = medium. Consensus → actual updates live as prints land. The curated week above carries the
+            deep context (history, implications, your stats); this list is the complete radar so nothing scheduled surprises you.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ------------------------------- the page ------------------------------- */
 
 function CompareBar({ label, value, max, money }: { label: string; value: number; max: number; money?: boolean }) {
@@ -786,6 +904,8 @@ export default function Catalysts() {
           </div>
         </div>
 
+        <FullWeekFeed ws={ws} today={today} />
+
         <div className="card">
           <div className="card-title">
             Your edge around catalysts <span className="hint">from your own trade history</span>
@@ -833,6 +953,8 @@ export default function Catalysts() {
           )}
           <div className="muted small" style={{ marginTop: 12 }}>
             Prepare a specific day in <span style={{ cursor: 'pointer', color: 'var(--gold)', textDecoration: 'underline' }} onClick={() => nav('/day')}>Trading Day → Preparation</span>, where these catalysts appear inline.
+
+        <Connects id="catalysts" />
           </div>
         </div>
       </div>

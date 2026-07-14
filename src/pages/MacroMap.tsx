@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Connects } from '../components/Connects';
 import {
   Area,
   AreaChart,
@@ -729,6 +730,7 @@ export default function MacroMap() {
         <RatesPanel />
         <GlobalMacroPanel />
         <BreadthPanel />
+        <Connects id="macro" />
         <CrossAssetPanel />
       </div>
     </>

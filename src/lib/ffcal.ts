@@ -26,12 +26,14 @@ function val(v: unknown): string | null {
   return s === '' ? null : s;
 }
 
-/** Map raw feed items to US LiveEventRows. Pure. */
-export function mapFfRows(json: unknown): LiveEventRow[] {
+/** Map raw feed items to LiveEventRows for the given currencies. Pure. */
+export function mapFfRows(json: unknown, currencies: string[] = ['USD']): LiveEventRow[] {
   if (!Array.isArray(json)) return [];
+  const want = new Set(currencies.map((c) => c.toUpperCase()));
   const out: LiveEventRow[] = [];
   for (const it of json as FfItem[]) {
-    if (String(it.country ?? '').toUpperCase() !== 'USD') continue;
+    const cur = String(it.country ?? '').toUpperCase();
+    if (!want.has(cur)) continue;
     const name = val(it.title);
     const date = String(it.date ?? '').slice(0, 10);
     if (!name || !/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
@@ -43,17 +45,19 @@ export function mapFfRows(json: unknown): LiveEventRow[] {
       previous: val(it.previous),
       actual: val(it.actual),
       instant: isNaN(parsed.getTime()) ? undefined : parsed.toISOString(),
+      impact: val(it.impact) ?? undefined,
+      currency: cur,
     });
   }
   return out;
 }
 
 /** Fetch one week ('this' | 'next') through the keyless proxy. Null on failure. */
-export async function fetchFfWeek(week: 'this' | 'next'): Promise<LiveEventRow[] | null> {
+export async function fetchFfWeek(week: 'this' | 'next', currencies: string[] = ['USD']): Promise<LiveEventRow[] | null> {
   try {
     const res = await fetch(`/api/ffcal?week=${week}`, { headers: { Accept: 'application/json' } });
     if (!res.ok) return null;
-    const rows = mapFfRows(await res.json());
+    const rows = mapFfRows(await res.json(), currencies);
     return rows.length ? rows : null;
   } catch {
     return null;
@@ -61,7 +65,7 @@ export async function fetchFfWeek(week: 'this' | 'next'): Promise<LiveEventRow[]
 }
 
 /** Both weeks, concatenated (either may be null in local dev). */
-export async function fetchFfRows(): Promise<LiveEventRow[]> {
-  const [a, b] = await Promise.all([fetchFfWeek('this'), fetchFfWeek('next')]);
+export async function fetchFfRows(currencies: string[] = ['USD']): Promise<LiveEventRow[]> {
+  const [a, b] = await Promise.all([fetchFfWeek('this', currencies), fetchFfWeek('next', currencies)]);
   return [...(a ?? []), ...(b ?? [])];
 }
