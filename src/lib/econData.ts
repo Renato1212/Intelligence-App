@@ -184,18 +184,32 @@ export interface IndicatorSeries {
 
 /* ------------------------------ transforms ------------------------------ */
 
+/** The period exactly `lag` months before "YYYY-MM". */
+function periodMinus(period: string, lag: number): string {
+  const y = Number(period.slice(0, 4));
+  const m = Number(period.slice(5, 7));
+  const total = y * 12 + (m - 1) - lag;
+  return `${Math.floor(total / 12)}-${String((total % 12) + 1).padStart(2, '0')}`;
+}
+
+/**
+ * Transforms are PERIOD-AWARE: the base observation is looked up by the exact
+ * month (1 or 12 back), never by array position. A raw series with a missing
+ * month must skip that point, not silently shift the base — an index-based
+ * lag turns one hole into a wrong YoY for every later month (e.g. CPI 4.5%
+ * instead of the published 4.2% because the base landed one month early).
+ */
 export function applyTransform(raw: PrintPoint[], t: Transform): PrintPoint[] {
   if (t === 'level') return raw;
-  if (t === 'diff') {
-    const out: PrintPoint[] = [];
-    for (let i = 1; i < raw.length; i++) out.push({ period: raw[i].period, value: raw[i].value - raw[i - 1].value });
-    return out;
-  }
-  const lag = t === 'pct1' ? 1 : 12;
+  const lag = t === 'pct1' ? 1 : t === 'diff' ? 1 : 12;
+  const byPeriod = new Map<string, number>();
+  for (const p of raw) byPeriod.set(p.period, p.value);
   const out: PrintPoint[] = [];
-  for (let i = lag; i < raw.length; i++) {
-    const base = raw[i - lag].value;
-    if (base !== 0) out.push({ period: raw[i].period, value: (raw[i].value / base - 1) * 100 });
+  for (const p of raw) {
+    const base = byPeriod.get(periodMinus(p.period, lag));
+    if (base == null) continue;
+    if (t === 'diff') out.push({ period: p.period, value: p.value - base });
+    else if (base !== 0) out.push({ period: p.period, value: (p.value / base - 1) * 100 });
   }
   return out;
 }
@@ -312,7 +326,7 @@ export function indicatorInsight(spec: IndicatorSpec, stats: PrintStats): string
 /* ------------------------------- fetching ------------------------------- */
 
 const API = 'https://api.db.nomics.world/v22/series';
-const CACHE_KEY = 'ei-econ-cache-v6'; // v6: FRED provider (PCE/retail), ISM seed, YoY defaults
+const CACHE_KEY = 'ei-econ-cache-v7'; // v7: period-aware transforms (YoY base bug), release-day merge
 const FRESH_MS = 20 * 3600 * 1000;
 
 interface CacheShape {
@@ -492,6 +506,29 @@ export async function loadIndicator(spec: IndicatorSpec, force = false): Promise
   const cache = readCache();
   const hit = cache[spec.id];
   if (!force && hit && Date.now() - new Date(hit.fetchedAt).getTime() < FRESH_MS && hit.points.length >= 4) {
+    // Release-day path: the cache is "fresh" but a new print may have landed
+    // since it was written (CPI at 13:30 Lisbon). If the cached series is
+    // behind the newest expected period, try a cheap live merge (the row set
+    // is shared + cached) so the print appears without waiting out the cache.
+    const lastCached = hit.points[hit.points.length - 1]?.period ?? null;
+    const cachedGap = staleGapMonths(lastCached);
+    if (cachedGap >= 1) {
+      try {
+        const recent = await fetchRecentPrints(spec, cachedGap);
+        const merged = mergePrints(hit.points, recent);
+        if (merged.liveCount > 0) {
+          const liveCount = (hit.liveCount ?? 0) + merged.liveCount;
+          cache[spec.id] = { ...hit, points: merged.points, liveCount };
+          writeCache(cache);
+          return {
+            series: { spec, points: merged.points, fetchedAt: hit.fetchedAt, officialThrough: hit.officialThrough ?? null, liveCount },
+            error: null,
+          };
+        }
+      } catch {
+        // best effort — fall through to the plain cached response
+      }
+    }
     return {
       series: { spec, points: hit.points, fetchedAt: hit.fetchedAt, officialThrough: hit.officialThrough ?? null, liveCount: hit.liveCount ?? 0 },
       error: null,
