@@ -15,7 +15,7 @@
  * are thin and cached. This is the layer terminals charge for — computed
  * from the same primary sources, with the reasoning shown.
  */
-import { fmpUrls } from './market';
+import { fmpDailyBarUrls, fmpUrls, parseFmpDaily } from './market';
 
 /* ----------------------------- earnings radar ----------------------------- */
 
@@ -74,7 +74,7 @@ export function rankEarnings(raw: unknown, fromISO: string, toISO: string): Earn
     if (!m || !/^\d{4}-\d{2}-\d{2}$/.test(date) || date < fromISO || date > toISO) continue;
     const time = String(r.time ?? '').toLowerCase();
     const session: EarningsRow['session'] = time === 'bmo' ? 'pre-market' : time === 'amc' ? 'after-close' : 'during';
-    const eps = Number(r.epsEstimated);
+    const eps = Number(r.epsEstimated ?? r.epsEstimate);
     out.push({ date, sym, name: m.name, session, drives: m.drives, note: m.note, epsEstimate: isFinite(eps) ? eps : null });
   }
   // one row per symbol (providers occasionally duplicate), earliest date wins
@@ -94,7 +94,8 @@ export async function fetchEarnings(fromISO: string, toISO: string): Promise<Ear
   } catch {
     // cache miss
   }
-  const urls = fmpUrls(`api/v3/earning_calendar?from=${fromISO}&to=${toISO}`);
+  // stable route first (new keys 403 on legacy v3), legacy fallback
+  const urls = [...fmpUrls(`stable/earnings-calendar?from=${fromISO}&to=${toISO}`), ...fmpUrls(`api/v3/earning_calendar?from=${fromISO}&to=${toISO}`)];
   for (const url of urls) {
     let res: Response;
     try {
@@ -149,8 +150,7 @@ export function volumePulse(bars: { date: string; volume: number }[]): VolumePul
 }
 
 export async function fetchVolumePulse(sym = 'SPY'): Promise<VolumePulse | null> {
-  const urls = fmpUrls(`api/v3/historical-price-full/${sym}?timeseries=30`);
-  for (const url of urls) {
+  for (const url of fmpDailyBarUrls(sym, { timeseries: 30 })) {
     let res: Response;
     try {
       res = await fetch(url);
@@ -164,9 +164,9 @@ export async function fetchVolumePulse(sym = 'SPY'): Promise<VolumePulse | null>
     } catch {
       continue;
     }
-    const hist = (json as { historical?: { date?: unknown; volume?: unknown }[] })?.historical;
-    if (!Array.isArray(hist)) continue;
-    return volumePulse(hist.map((h) => ({ date: String(h.date ?? ''), volume: Number(h.volume) })));
+    const bars = parseFmpDaily(json).filter((b) => b.volume != null);
+    if (!bars.length) continue;
+    return volumePulse(bars.map((b) => ({ date: b.date, volume: b.volume! })));
   }
   return null;
 }

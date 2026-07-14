@@ -80,7 +80,7 @@ export const DATA_SOURCES: DataSource[] = [
     host: 'publicreporting.cftc.gov',
     needsKey: false,
     keyless: true,
-    url: () => 'https://publicreporting.cftc.gov/resource/6dca-aqww.json?$limit=1&$select=report_date_as_yyyy_mm_dd',
+    url: () => 'https://publicreporting.cftc.gov/resource/6dca-aqww.json?$limit=1&$select=report_date_as_yyyy_mm_dd&$order=report_date_as_yyyy_mm_dd%20DESC',
     parseSample: (j) => {
       const row = Array.isArray(j) ? (j[0] as Record<string, unknown>) : null;
       const d = row?.report_date_as_yyyy_mm_dd;
@@ -102,12 +102,12 @@ export const DATA_SOURCES: DataSource[] = [
   },
   {
     id: 'gdelt',
-    label: 'GDELT — global news attention',
-    powers: 'Macro Map narrative monitor',
-    host: 'api.gdeltproject.org',
+    label: 'GDELT — global news attention (via your deployment)',
+    powers: 'Macro Map narrative monitor · Terminal narrative heat',
+    host: '/api/gdelt (serverless proxy)',
     needsKey: false,
     keyless: true,
-    url: () => 'https://api.gdeltproject.org/api/v2/doc/doc?query=markets&mode=timelinevol&format=json&timespan=1d',
+    url: () => '/api/gdelt?query=markets&mode=timelinevol&timespan=1d',
     parseSample: (j) => {
       const t = (j as { timeline?: unknown[] })?.timeline;
       return Array.isArray(t) ? 'reachable' : 'reachable';
@@ -128,12 +128,12 @@ export const DATA_SOURCES: DataSource[] = [
   },
   {
     id: 'imf',
-    label: 'IMF — DataMapper (WEO)',
+    label: 'IMF — DataMapper (via your deployment)',
     powers: 'Macro Map global growth',
-    host: 'www.imf.org',
+    host: '/api/imf (serverless proxy)',
     needsKey: false,
     keyless: true,
-    url: () => 'https://www.imf.org/external/datamapper/api/v1/NGDP_RPCH/USA',
+    url: () => '/api/imf?path=NGDP_RPCH%2FUSA',
     parseSample: (j) => {
       const us = (j as { values?: { NGDP_RPCH?: { USA?: Record<string, unknown> } } })?.values?.NGDP_RPCH?.USA;
       if (!us) return null;
@@ -158,7 +158,8 @@ export const DATA_SOURCES: DataSource[] = [
     host: 'financialmodelingprep.com',
     needsKey: false,
     keyless: false,
-    url: (key) => (key ? `https://financialmodelingprep.com/api/v3/quote/SPY?apikey=${key}` : '/api/fmp?p=api%2Fv3%2Fquote%2FSPY'),
+    // stable route: new FMP keys get 403 on the legacy /api/v3 paths
+    url: (key) => (key ? `https://financialmodelingprep.com/stable/quote?symbol=SPY&apikey=${key}` : '/api/fmp?p=stable%2Fquote%3Fsymbol%3DSPY'),
     parseSample: (j) => {
       const row = Array.isArray(j) ? (j[0] as Record<string, unknown>) : null;
       const p = n(row?.price);
@@ -170,9 +171,16 @@ export const DATA_SOURCES: DataSource[] = [
 /* ----------------------------- classification ---------------------------- */
 
 /** Pure: turn an outcome into a status + message. Unit-testable without network. */
-export function classifyResult(outcome: { threw: boolean; ok?: boolean; httpStatus?: number }): { status: SourceStatus; detail: string } {
+export function classifyResult(outcome: { threw: boolean; ok?: boolean; httpStatus?: number }, sameOrigin = false): { status: SourceStatus; detail: string } {
   if (outcome.threw) {
-    return { status: 'blocked', detail: 'Network/CORS — the browser could not reach this host from your machine' };
+    // a same-origin /api/* URL can't be CORS-blocked — a throw there means the
+    // serverless function didn't answer in time (cold start / slow upstream)
+    return {
+      status: 'blocked',
+      detail: sameOrigin
+        ? 'The deployment endpoint did not answer in time — usually a slow upstream or cold start; recheck in a few seconds'
+        : 'Network/CORS — the browser could not reach this host from your machine',
+    };
   }
   if (outcome.ok) return { status: 'live', detail: 'reachable' };
   const s = outcome.httpStatus ?? 0;
@@ -227,7 +235,7 @@ export async function checkSource(src: DataSource, key = getMarketApiKey(), time
     return { status, httpStatus: res.status, latencyMs, detail, sample };
   } catch {
     const latencyMs = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0);
-    const { status, detail } = classifyResult({ threw: true });
+    const { status, detail } = classifyResult({ threw: true }, src.url(key).startsWith('/'));
     return { status, latencyMs, detail };
   }
 }

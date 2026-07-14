@@ -166,17 +166,27 @@ export async function loadNarrative(force = false): Promise<NarrativeLoad> {
   let lastErr: string | null = null;
   await Promise.all(
     THEMES.map(async (theme) => {
-      const url = `${API}?query=${encodeURIComponent(theme.query)}&mode=timelinevol&timespan=14d&format=json`;
-      try {
-        const res = await fetch(url, { headers: { Accept: 'application/json' } });
-        if (!res.ok) {
-          lastErr = `News service returned ${res.status}.`;
-          return;
+      // the deployment relay first (GDELT's CORS is flaky on some networks),
+      // direct as the dev-server fallback
+      const urls = [
+        `/api/gdelt?query=${encodeURIComponent(theme.query)}&mode=timelinevol&timespan=14d`,
+        `${API}?query=${encodeURIComponent(theme.query)}&mode=timelinevol&timespan=14d&format=json`,
+      ];
+      for (const url of urls) {
+        try {
+          const res = await fetch(url, { headers: { Accept: 'application/json' } });
+          if (!res.ok) {
+            lastErr = `News service returned ${res.status}.`;
+            continue;
+          }
+          const points = parseTimeline(await res.json());
+          if (points.length >= 5) {
+            results.push({ themeId: theme.id, points });
+            return;
+          }
+        } catch {
+          lastErr = 'Could not reach the news service (network).';
         }
-        const points = parseTimeline(await res.json());
-        if (points.length >= 5) results.push({ themeId: theme.id, points });
-      } catch {
-        lastErr = 'Could not reach the news service (network).';
       }
     }),
   );
@@ -196,12 +206,22 @@ export async function loadNarrative(force = false): Promise<NarrativeLoad> {
 
 /** Latest headlines for one theme (not cached — always fresh on demand). */
 export async function loadHeadlines(theme: NarrativeTheme): Promise<{ headlines: Headline[]; error: string | null }> {
-  const url = `${API}?query=${encodeURIComponent(theme.query)}&mode=artlist&maxrecords=20&timespan=2d&sort=datedesc&format=json`;
-  try {
-    const res = await fetch(url, { headers: { Accept: 'application/json' } });
-    if (!res.ok) return { headlines: [], error: `News service returned ${res.status}.` };
-    return { headlines: parseHeadlines(await res.json()), error: null };
-  } catch {
-    return { headlines: [], error: 'Could not reach the news service (network).' };
+  const urls = [
+    `/api/gdelt?query=${encodeURIComponent(theme.query)}&mode=artlist&maxrecords=20&timespan=2d`,
+    `${API}?query=${encodeURIComponent(theme.query)}&mode=artlist&maxrecords=20&timespan=2d&sort=datedesc&format=json`,
+  ];
+  let lastErr = 'Could not reach the news service (network).';
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      if (!res.ok) {
+        lastErr = `News service returned ${res.status}.`;
+        continue;
+      }
+      return { headlines: parseHeadlines(await res.json()), error: null };
+    } catch {
+      // try next
+    }
   }
+  return { headlines: [], error: lastErr };
 }

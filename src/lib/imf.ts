@@ -219,6 +219,12 @@ async function fetchJson(url: string): Promise<unknown | null> {
   }
 }
 
+/** DataMapper via the deployment's /api/imf relay first (the IMF host is not
+ * reliably CORS-open from every network), direct as the dev-server fallback. */
+async function fetchDatamapper(pathAfterV1: string): Promise<unknown | null> {
+  return (await fetchJson(`/api/imf?path=${encodeURIComponent(pathAfterV1)}`)) ?? (await fetchJson(`${DATAMAPPER}/${pathAfterV1}`));
+}
+
 /** keep the cache small: recent history + all forecast years */
 function trimCells(cells: WeoCell[], fromYear: number): WeoCell[] {
   return cells.filter((c) => c.year >= fromYear);
@@ -227,8 +233,8 @@ function trimCells(cells: WeoCell[], fromYear: number): WeoCell[] {
 async function fetchWeoDataMapper(fromYear: number): Promise<WeoRow[] | null> {
   const path = WEO_ECONOMIES.map((e) => e.code).join('/');
   const [gdpJson, inflJson] = await Promise.all([
-    fetchJson(`${DATAMAPPER}/${GDP_IND}/${path}`),
-    fetchJson(`${DATAMAPPER}/${INFL_IND}/${path}`),
+    fetchDatamapper(`${GDP_IND}/${path}`),
+    fetchDatamapper(`${INFL_IND}/${path}`),
   ]);
   if (!gdpJson || !inflJson) return null;
   const gdp = parseDataMapper(gdpJson, GDP_IND);
