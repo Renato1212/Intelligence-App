@@ -1,4 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks';
+import { Connects } from '../components/Connects';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -378,6 +379,8 @@ export default function MarketIntel() {
               <div><b>Percentile ≥ 90 or ≤ 10</b> <span className="muted">— positioning at a multi-year extreme. Not a signal to fade blindly, but squeezes and failed breakouts start here. Pair it with a catalyst and a technical level.</span></div>
               <div><b>Big weekly shift / net flip</b> <span className="muted">— repositioning is information: someone changed their mind in size. Ask what they saw, and whether your markets have priced it.</span></div>
             </div>
+
+        <Connects id="intel" />
           </div>
         </div>
       </div>

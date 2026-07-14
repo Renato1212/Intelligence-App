@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Connects } from '../components/Connects';
 import { Principle } from '../components/ui';
 import {
   allSessionStates,
@@ -255,6 +256,8 @@ export default function Sessions() {
           Hours shown are each market's liquid/active window (cash or pit hours), computed in the market's own timezone and
           rendered in Lisbon — so DST on both sides is always correct. Electronic (Globex) trading runs nearly 24h around
           these; the windows above are where the volume that moves price actually concentrates.
+
+        <Connects id="sessions" />
         </div>
       </div>
     </>
