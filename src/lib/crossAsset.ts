@@ -8,7 +8,7 @@
  * each asset's trend/volatility state — from daily closes on the trader's
  * free FMP key (ETF proxies, same as the day-ahead briefing).
  */
-import { fmpUrls } from './market';
+import { fmpDailyBarUrls, parseFmpDaily } from './market';
 
 export const CROSS_ASSETS: { symbol: string; label: string; short: string }[] = [
   { symbol: 'SPY', label: 'S&P 500', short: 'SPX' },
@@ -240,18 +240,14 @@ export async function loadBreadth(force = false): Promise<{ read: BreadthRead | 
   let lastErr: string | null = null;
   await Promise.all(
     wanted.map(async (symbol) => {
-      for (const url of fmpUrls(`api/v3/historical-price-full/${symbol}?serietype=line&timeseries=90`)) {
+      for (const url of fmpDailyBarUrls(symbol, { timeseries: 90 })) {
         try {
           const res = await fetch(url);
           if (!res.ok) {
             lastErr = res.status === 501 ? 'no-key' : `Market-data service returned ${res.status}.`;
             continue;
           }
-          const raw = (await res.json()) as { historical?: { date?: string; close?: number }[] };
-          const closes = (raw.historical ?? [])
-            .map((h) => ({ date: String(h.date ?? ''), close: Number(h.close) }))
-            .filter((h) => h.date && isFinite(h.close))
-            .sort((x, y) => x.date.localeCompare(y.date));
+          const closes = parseFmpDaily(await res.json());
           if (closes.length >= 55) {
             series.push({ symbol, closes });
             return;
@@ -306,18 +302,14 @@ export async function loadCrossAsset(force = false): Promise<CrossAssetLoad> {
   let lastErr: string | null = null;
   await Promise.all(
     CROSS_ASSETS.map(async (a) => {
-      for (const url of fmpUrls(`api/v3/historical-price-full/${a.symbol}?serietype=line&timeseries=140`)) {
+      for (const url of fmpDailyBarUrls(a.symbol, { timeseries: 140 })) {
         try {
           const res = await fetch(url);
           if (!res.ok) {
             lastErr = res.status === 501 ? 'no-key' : `Market-data service returned ${res.status}.`;
             continue;
           }
-          const raw = (await res.json()) as { historical?: { date?: string; close?: number }[] };
-          const closes = (raw.historical ?? [])
-            .map((h) => ({ date: String(h.date ?? ''), close: Number(h.close) }))
-            .filter((h) => h.date && isFinite(h.close))
-            .sort((x, y) => x.date.localeCompare(y.date));
+          const closes = parseFmpDaily(await res.json());
           if (closes.length >= 80) {
             series.push({ symbol: a.symbol, closes });
             return;

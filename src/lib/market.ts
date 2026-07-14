@@ -43,7 +43,11 @@ const KEY_STORAGE = 'ei-fmp-key';
 const CACHE_PREFIX = 'ei-briefing-';
 
 export function getMarketApiKey(): string {
-  return localStorage.getItem(KEY_STORAGE) ?? '';
+  try {
+    return localStorage.getItem(KEY_STORAGE) ?? '';
+  } catch {
+    return ''; // no storage (SSR/tests/private mode) — keyless path
+  }
 }
 
 /**
@@ -65,6 +69,37 @@ export function fmpUrls(pathWithQuery: string): string[] {
 export function setMarketApiKey(key: string): void {
   if (key.trim()) localStorage.setItem(KEY_STORAGE, key.trim());
   else localStorage.removeItem(KEY_STORAGE);
+}
+
+/**
+ * FMP retired its /api/v3 ("legacy") routes for accounts created after
+ * Aug 2025 — new keys get HTTP 403 on them. Every fetch therefore tries the
+ * /stable path first and falls back to the legacy path for old keys.
+ * Daily-bar candidates for one symbol, in that order (each × direct/relay).
+ */
+export function fmpDailyBarUrls(symbol: string, opts: { from?: string; to?: string; timeseries?: number } = {}): string[] {
+  const to = opts.to ?? new Date().toISOString().slice(0, 10);
+  const from = opts.from ?? new Date(Date.now() - Math.round((opts.timeseries ?? 120) * 1.6) * 86400000).toISOString().slice(0, 10);
+  const stable = `stable/historical-price-eod/light?symbol=${symbol}&from=${from}&to=${to}`;
+  const legacy = `api/v3/historical-price-full/${symbol}?serietype=line${opts.timeseries ? `&timeseries=${opts.timeseries}` : `&from=${from}&to=${to}`}`;
+  return [...fmpUrls(stable), ...fmpUrls(legacy)];
+}
+
+/** Pure: parse daily bars from EITHER payload shape — stable (a bare array of
+ * {date, price|close, volume}) or legacy v3 ({historical: [{date, close}]}).
+ * Ascending by date; volume null when the shape doesn't carry it. */
+export function parseFmpDaily(json: unknown): { date: string; close: number; volume: number | null }[] {
+  const rows = Array.isArray(json) ? json : (json as { historical?: unknown[] })?.historical;
+  if (!Array.isArray(rows)) return [];
+  const out: { date: string; close: number; volume: number | null }[] = [];
+  for (const r of rows as Record<string, unknown>[]) {
+    const date = String(r.date ?? '').slice(0, 10);
+    const close = Number(r.close ?? r.price);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !isFinite(close) || close <= 0) continue;
+    const vol = Number(r.volume);
+    out.push({ date, close, volume: isFinite(vol) && vol > 0 ? vol : null });
+  }
+  return out.sort((a, b) => a.date.localeCompare(b.date));
 }
 
 /**
@@ -182,7 +217,8 @@ async function fetchEvents(date: string): Promise<{ events: EconEvent[]; error: 
 async function fetchQuotes(): Promise<{ quotes: QuoteRow[]; error: string | null }> {
   const symbols = QUOTE_SYMBOLS.map((q) => q.symbol).join(',');
   let res: Response | null = null;
-  for (const url of fmpUrls(`api/v3/quote/${symbols}`)) {
+  // stable batch first (new keys), legacy v3 fallback (pre-Aug-2025 keys)
+  for (const url of [...fmpUrls(`stable/batch-quote?symbols=${symbols}`), ...fmpUrls(`api/v3/quote/${symbols}`)]) {
     try {
       const r = await fetch(url);
       if (r.ok) {
@@ -195,6 +231,26 @@ async function fetchQuotes(): Promise<{ quotes: QuoteRow[]; error: string | null
       // try the next candidate
     }
   }
+  // last resort for plans without batch quotes: one stable call per symbol
+  if (res && !res.ok && res.status !== 501) {
+    const singles = await Promise.all(
+      QUOTE_SYMBOLS.map(async (s) => {
+        for (const url of fmpUrls(`stable/quote?symbol=${s.symbol}`)) {
+          try {
+            const r = await fetch(url);
+            if (!r.ok) continue;
+            const j = (await r.json()) as Record<string, unknown>[];
+            if (Array.isArray(j) && j[0]?.price != null) return j[0];
+          } catch {
+            // next candidate
+          }
+        }
+        return null;
+      }),
+    );
+    const got = singles.filter((q): q is Record<string, unknown> => q != null);
+    if (got.length) res = new Response(JSON.stringify(got), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
   if (!res) return { quotes: [], error: 'Could not reach the market-data service (network/CORS).' };
   if (!res.ok) return { quotes: [], error: res.status === 501 ? 'Quotes need an FMP key — paste one in Settings, or set FMP_API_KEY on the deployment (one-time, works everywhere).' : planError(res.status, 'live quotes') };
   const raw = (await res.json()) as Record<string, unknown>[];
@@ -204,7 +260,8 @@ async function fetchQuotes(): Promise<{ quotes: QuoteRow[]; error: string | null
     return !!q && q.price != null;
   }).map((s) => {
     const q = bySymbol.get(s.symbol)!;
-    return { symbol: s.symbol, label: s.label, price: Number(q.price ?? 0), changePct: Number(q.changesPercentage ?? 0) };
+    // v3 says changesPercentage, stable says changePercentage — accept both
+    return { symbol: s.symbol, label: s.label, price: Number(q.price ?? 0), changePct: Number(q.changesPercentage ?? q.changePercentage ?? 0) };
   });
   if (!quotes.length) return { quotes: [], error: 'No quotes returned for the watchlist on this plan.' };
   return { quotes, error: null };
