@@ -60,6 +60,20 @@ export const DATA_SOURCES: DataSource[] = [
     },
   },
   {
+    id: 'fred',
+    label: 'FRED (official PCE/retail) — via your deployment',
+    powers: 'Catalysts PCE & Retail Sales history · inflation cross-read',
+    host: '/api/fred (serverless proxy)',
+    needsKey: false,
+    keyless: true,
+    url: () => '/api/fred?id=PCEPILFE',
+    parseSample: (j) => {
+      const arr = (j as { series?: { PCEPILFE?: { period?: string }[] } })?.series?.PCEPILFE;
+      const last = Array.isArray(arr) && arr.length ? arr[arr.length - 1]?.period : null;
+      return last ? `Core PCE thru ${last}` : null;
+    },
+  },
+  {
     id: 'cftc',
     label: 'CFTC — COT positioning',
     powers: 'Market Intel',
