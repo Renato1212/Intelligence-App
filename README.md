@@ -321,6 +321,23 @@ to-the-second view of the trading day:
 - A **Principle** on timing the day, plus a why/how note on every session (why the window matters
   and how to trade it) so the map teaches the session playbook while you use it.
 
+### Edge Terminal — one screen, one read
+The flagship overview: everything the platform knows, fused into a computed, explainable desk-head
+read. The **regime banner** classifies the day (RISK-ON / NARROW TAPE / EVENT-RISK / RISK-OFF /
+TRANSITION) from the vol term structure first, breadth second. An **instrument panel** of tiles
+shows the inputs live: vol regime (VIX curve), the options-priced 1σ day, sectors above their
+50DMA + equal-vs-cap-weight rotation, the 2s10s curve, positioning extremes (COT percentiles),
+narrative heat (global media volume), SPY volume vs its 20-day norm, and days to monthly OPEX.
+**The Read** turns those into three sourced lists — leans (direction of least resistance), risks
+(what can break the read: crowded books, OPEX pin, today's tier-1 prints sized against the expected
+move, earnings concentration, the surging story) and focus (how to trade the regime). Below it: the
+**cross-asset state** table (20-day trend, realized vol and its percentile per market, plus
+correlation-break detection — when stable relationships snap, a regime is changing before the
+headlines say so) and the **earnings radar** — only the ~20 names whose prints actually move index
+futures, with session (pre-market / after-close), which contracts they hit, and why each matters.
+Every block loads independently and degrades honestly when a feed is down; nothing is a black box —
+each line of the verdict names the input that produced it.
+
 ### Charts — TradingView inside the platform
 The Charts section embeds TradingView's free Advanced Chart widget: full price history, live
 updating quotes, and the complete drawing/indicator toolset, rendered in Lisbon time like the rest

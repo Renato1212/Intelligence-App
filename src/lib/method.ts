@@ -198,6 +198,11 @@ export const CONNECTS: Record<string, Connection[]> = {
     { route: '/optvol', label: 'Options & Vol', why: 'the session flow map and the dealer levels are the same mechanics seen from time vs price' },
     { route: '/analytics', label: 'Edge Analytics', why: 'your timing heatmap shows which of these windows actually pays you' },
   ],
+  terminal: [
+    { route: '/catalysts', label: 'Catalysts', why: 'the Terminal names today\'s scheduled risk — the deep print study and playbook live here' },
+    { route: '/optvol', label: 'Options & Vol', why: 'the regime and rails on the Terminal come from this section\'s full gamma/vol machinery' },
+    { route: '/day', label: 'Preparation', why: 'turn the Terminal read into IF-THEN statements before the open — the read is input, the plan is the edge' },
+  ],
   charts: [
     { route: '/optvol', label: 'Options & Vol', why: 'draw the put wall, call wall, flip and expected-move band on the chart — dealer levels are the ones that hold' },
     { route: '/catalysts', label: 'Catalysts', why: 'time-stamp the chart with today\'s release times; the candle AT the print is the regime tell' },
