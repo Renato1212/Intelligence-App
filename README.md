@@ -299,6 +299,16 @@ to-the-second view of the trading day:
 - A **Principle** on timing the day, plus a why/how note on every session (why the window matters
   and how to trade it) so the map teaches the session playbook while you use it.
 
+### Charts — TradingView inside the platform
+The Charts section embeds TradingView's free Advanced Chart widget: full price history, live
+updating quotes, and the complete drawing/indicator toolset, rendered in Lisbon time like the rest
+of the app. One-click chips cover the platform's instruments — ES, NQ, RTY, YM, ZN, ZB, 6E, GC, CL
+plus the real-time cash proxies (SPX, NDX, VIX, DXY) — with timeframe chips from 5m to weekly, and
+your last symbol/timeframe choice remembered. A teaching block explains how to combine the chart
+with the other sections (draw the dealer levels from Options & Vol, time-stamp the session opens
+and release times, use VWAP as fair value), and an honest data note: futures quotes on the free
+embed are ~10 min exchange-delayed, while the cash indices update in real time.
+
 ### Live day-ahead briefing
 The preparation page can connect a free market-data key (financialmodelingprep.com) and fills
 itself in every morning: today's tier-1 economic events with consensus and previous prints —
