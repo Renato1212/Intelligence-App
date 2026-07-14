@@ -248,7 +248,7 @@ export const MARKET_CACHE_PREFIXES = [
 ];
 
 /** Keys that must NEVER be cleared by the market-data refresh. */
-export const PROTECTED_KEYS = ['ei-fmp-key', 'ei-risk-config', 'ei-last-user', 'ei-local-only', 'ei-media'];
+export const PROTECTED_KEYS = ['ei-fmp-key', 'ei-risk-config', 'ei-last-user', 'ei-local-only', 'ei-media', 'ei-print-archive-v1'];
 
 /** Pure: which of the given keys the refresh would remove. Testable. */
 export function cacheKeysToClear(allKeys: string[]): string[] {

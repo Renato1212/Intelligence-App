@@ -12,6 +12,7 @@ import MarketIntel from './pages/MarketIntel';
 import MacroMap from './pages/MacroMap';
 import OptionsVol from './pages/OptionsVol';
 import Sessions from './pages/Sessions';
+import Charts from './pages/Charts';
 import Method from './pages/Method';
 import Journal from './pages/Journal';
 import Analytics from './pages/Analytics';
@@ -39,6 +40,7 @@ const I = {
   macro: <path d="M2 20c3-1 4-7 7-7s3 4 6 4 4-9 7-9M2 12c3 0 4-5 7-5s3 3 6 3 4-4 7-4" />,
   optvol: <path d="M4 18V6M4 12c2 0 2-4 4-4s2 8 4 8 2-8 4-8 2 4 4 4M20 18V6" />,
   sessions: <path d="M12 2a10 10 0 100 20 10 10 0 000-20zM12 7v5l3 2" />,
+  charts: <path d="M7 5v3M7 16v3M5 8h4v8H5zM17 2v3M17 18v3M15 5h4v13h-4z" />,
   method: <path d="M4 6h16M4 12h10M4 18h7M18 15l3 3-3 3" />,
   risk: <path d="M12 2l8 4v6c0 5-3.4 8.5-8 10-4.6-1.5-8-5-8-10V6l8-4zM12 8v4M12 16h.01" />,
   account: <path d="M12 12a4 4 0 100-8 4 4 0 000 8zM4 21c0-4.4 3.6-8 8-8s8 3.6 8 8" />,
@@ -119,6 +121,7 @@ function Shell() {
           <Nav to="/optvol" icon={I.optvol} label="Options & Vol" />
           <Nav to="/catalysts" icon={I.catalysts} label="Catalysts" />
           <Nav to="/sessions" icon={I.sessions} label="Session Clock" />
+          <Nav to="/charts" icon={I.charts} label="Charts" />
           <div className="nav-section">Journal</div>
           <Nav to="/day" icon={I.day} label="Trading Day" />
           <Nav to="/trades" icon={I.trades} label="Trades" />
@@ -143,6 +146,7 @@ function Shell() {
             <Route path="/macro" element={<MacroMap />} />
             <Route path="/optvol" element={<OptionsVol />} />
             <Route path="/sessions" element={<Sessions />} />
+            <Route path="/charts" element={<Charts />} />
             <Route path="/trades" element={<Trades />} />
             <Route path="/trades/:id" element={<TradeDetail />} />
             <Route path="/journal" element={<Journal />} />

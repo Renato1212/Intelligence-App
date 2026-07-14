@@ -183,6 +183,7 @@ export const CONNECTS: Record<string, Connection[]> = {
     { route: '/catalysts', label: 'Catalysts', why: 'event premium in the VIX curve points at a specific date — find it on the calendar' },
     { route: '/macro', label: 'Macro Map', why: 'gamma says HOW price moves; the narrative and cross-asset reads say WHICH WAY to lean' },
     { route: '/sessions', label: 'Session Clock', why: 'walls matter most into the close and OPEX hours — time-stamp your levels' },
+    { route: '/charts', label: 'Charts', why: 'draw these levels on the TradingView chart and watch how price treats them live' },
   ],
   macro: [
     { route: '/intel', label: 'Market Intel', why: 'a narrative surge + a positioning extreme in the same market is the crowded-story setup' },
@@ -196,5 +197,10 @@ export const CONNECTS: Record<string, Connection[]> = {
   sessions: [
     { route: '/optvol', label: 'Options & Vol', why: 'the session flow map and the dealer levels are the same mechanics seen from time vs price' },
     { route: '/analytics', label: 'Edge Analytics', why: 'your timing heatmap shows which of these windows actually pays you' },
+  ],
+  charts: [
+    { route: '/optvol', label: 'Options & Vol', why: 'draw the put wall, call wall, flip and expected-move band on the chart — dealer levels are the ones that hold' },
+    { route: '/catalysts', label: 'Catalysts', why: 'time-stamp the chart with today\'s release times; the candle AT the print is the regime tell' },
+    { route: '/sessions', label: 'Session Clock', why: 'the chart renders in Lisbon time — line up the session opens and the prime-time overlap' },
   ],
 };
