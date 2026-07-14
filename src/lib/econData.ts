@@ -50,14 +50,15 @@ export const INDICATORS: IndicatorSpec[] = [
     sources: [{ provider: 'BLS', dataset: 'ce', series: 'CES0500000003' }, { provider: 'BLS', dataset: 'CES', series: 'CES0500000003' }],
   },
   {
-    id: 'cpi-headline', eventShort: 'CPI', label: 'CPI headline', unit: '% m/m', transform: 'pct1', decimals: 2,
-    sources: [{ provider: 'BLS', dataset: 'cu', series: 'CUSR0000SA0' }, { provider: 'BLS', dataset: 'CU', series: 'CUSR0000SA0' }],
+    // FIRST = the default view. The headline year-over-year print is the number
+    // calendars and the market quote ("inflation is 2.4%"). BLS publishes the
+    // official YoY off the NSA index (CUUR…), not the SA one.
+    id: 'cpi-yoy', eventShort: 'CPI', label: 'CPI YoY', unit: '% y/y', transform: 'pct12', decimals: 1,
+    sources: [{ provider: 'BLS', dataset: 'cu', series: 'CUUR0000SA0' }, { provider: 'BLS', dataset: 'CU', series: 'CUUR0000SA0' }],
   },
   {
-    // the headline year-over-year print the market quotes ("inflation is 2.4%").
-    // BLS publishes the official YoY off the NSA index (CUUR…), not the SA one.
-    id: 'cpi-yoy', eventShort: 'CPI', label: 'CPI headline YoY', unit: '% y/y', transform: 'pct12', decimals: 1,
-    sources: [{ provider: 'BLS', dataset: 'cu', series: 'CUUR0000SA0' }, { provider: 'BLS', dataset: 'CU', series: 'CUUR0000SA0' }],
+    id: 'cpi-headline', eventShort: 'CPI', label: 'CPI m/m', unit: '% m/m', transform: 'pct1', decimals: 2,
+    sources: [{ provider: 'BLS', dataset: 'cu', series: 'CUSR0000SA0' }, { provider: 'BLS', dataset: 'CU', series: 'CUSR0000SA0' }],
   },
   {
     id: 'cpi-core', eventShort: 'CPI', label: 'Core CPI', unit: '% m/m', transform: 'pct1', decimals: 2,
@@ -76,6 +77,10 @@ export const INDICATORS: IndicatorSpec[] = [
     ],
   },
   {
+    id: 'ppi-yoy', eventShort: 'PPI', label: 'PPI YoY', unit: '% y/y', transform: 'pct12', decimals: 1,
+    sources: [{ provider: 'BLS', dataset: 'wp', series: 'WPSFD4' }, { provider: 'BLS', dataset: 'WP', series: 'WPSFD4' }],
+  },
+  {
     // BLS reports openings in thousands; displayed in millions
     id: 'jolts-openings', eventShort: 'JOLTS', label: 'Job openings', unit: 'M', transform: 'level', scale: 0.001, decimals: 2,
     sources: [
@@ -84,32 +89,62 @@ export const INDICATORS: IndicatorSpec[] = [
       { provider: 'BLS', dataset: 'jt', series: 'JTS00000000JOL' },
     ],
   },
+  // ISM licenses its data — no free official API or mirror exists. The app
+  // ships the recent official print record (SEED_PRINTS below) and the live
+  // calendar layer + archive extend it with each new release.
   {
     id: 'ism-mfg', eventShort: 'ISM Mfg', label: 'ISM Manufacturing PMI', unit: 'index', transform: 'level', decimals: 1,
-    sources: [{ provider: 'ISM', dataset: 'pmi', series: 'pmi' }],
+    sources: [],
   },
   {
     id: 'ism-svc', eventShort: 'ISM Svcs', label: 'ISM Services PMI', unit: 'index', transform: 'level', decimals: 1,
-    sources: [
-      { provider: 'ISM', dataset: 'nmi', series: 'nmi' },
-      { provider: 'ISM', dataset: 'nm-pmi', series: 'nm-pmi' },
-    ],
-  },
-  // live-only series: no free keyless mirror exists, but the market-data key's
-  // historical calendar actuals reconstruct the recent print history
-  {
-    id: 'retail-mm', eventShort: 'Retail Sales', label: 'Retail sales', unit: '% m/m', transform: 'level', decimals: 1,
     sources: [],
   },
+  // PCE (BEA) and retail sales (Census) are not on the BLS API; FRED's keyless
+  // CSV endpoint carries the full official history via our /api/fred relay.
   {
-    id: 'pce-core-mm', eventShort: 'PCE', label: 'Core PCE', unit: '% m/m', transform: 'level', decimals: 2,
-    sources: [],
+    id: 'retail-mm', eventShort: 'Retail Sales', label: 'Retail sales m/m', unit: '% m/m', transform: 'pct1', decimals: 1,
+    sources: [{ provider: 'FRED', dataset: 'fred', series: 'RSAFS' }],
   },
   {
-    id: 'pce-core-yoy', eventShort: 'PCE', label: 'Core PCE YoY', unit: '% y/y', transform: 'level', decimals: 1,
-    sources: [],
+    id: 'pce-core-yoy', eventShort: 'PCE', label: 'Core PCE YoY', unit: '% y/y', transform: 'pct12', decimals: 1,
+    sources: [{ provider: 'FRED', dataset: 'fred', series: 'PCEPILFE' }],
+  },
+  {
+    id: 'pce-core-mm', eventShort: 'PCE', label: 'Core PCE m/m', unit: '% m/m', transform: 'pct1', decimals: 2,
+    sources: [{ provider: 'FRED', dataset: 'fred', series: 'PCEPILFE' }],
+  },
+  {
+    id: 'pce-headline-yoy', eventShort: 'PCE', label: 'PCE YoY', unit: '% y/y', transform: 'pct12', decimals: 1,
+    sources: [{ provider: 'FRED', dataset: 'fred', series: 'PCEPI' }],
   },
 ];
+
+/**
+ * Bundled official print record for series with NO free keyless API anywhere
+ * (ISM licenses its data). Values are the official headline PMI prints as
+ * published in ISM's monthly Report On Business press releases — the live
+ * calendar layer and the local archive extend this forward automatically, so
+ * the bundle only has to cover history. Update opportunistically on releases.
+ */
+export const SEED_PRINTS: Record<string, PrintPoint[]> = {
+  'ism-mfg': [
+    { period: '2025-01', value: 50.9 }, { period: '2025-02', value: 50.3 }, { period: '2025-03', value: 49.0 },
+    { period: '2025-04', value: 48.7 }, { period: '2025-05', value: 48.5 }, { period: '2025-06', value: 49.0 },
+    { period: '2025-07', value: 48.0 }, { period: '2025-08', value: 48.7 }, { period: '2025-09', value: 49.1 },
+    { period: '2025-10', value: 48.7 }, { period: '2025-11', value: 48.2 }, { period: '2025-12', value: 47.9 },
+    { period: '2026-01', value: 52.6 }, { period: '2026-02', value: 52.4 }, { period: '2026-03', value: 52.7 },
+    { period: '2026-04', value: 52.7 }, { period: '2026-05', value: 54.0 }, { period: '2026-06', value: 53.3 },
+  ],
+  'ism-svc': [
+    { period: '2025-01', value: 52.8 }, { period: '2025-02', value: 53.5 }, { period: '2025-03', value: 50.8 },
+    { period: '2025-04', value: 51.6 }, { period: '2025-05', value: 49.9 }, { period: '2025-06', value: 50.8 },
+    { period: '2025-07', value: 50.1 }, { period: '2025-08', value: 52.0 }, { period: '2025-09', value: 50.0 },
+    { period: '2025-10', value: 52.4 }, { period: '2025-11', value: 52.6 }, { period: '2025-12', value: 54.4 },
+    { period: '2026-01', value: 53.8 }, { period: '2026-02', value: 56.1 }, { period: '2026-03', value: 54.0 },
+    { period: '2026-04', value: 53.6 }, { period: '2026-05', value: 54.5 }, { period: '2026-06', value: 54.0 },
+  ],
+};
 
 export const INDICATORS_BY_EVENT = new Map<string, IndicatorSpec[]>();
 for (const ind of INDICATORS) {
@@ -128,6 +163,12 @@ export interface PrintPoint {
   /** period the data is FOR (e.g. 2026-05 for the May NFP), YYYY-MM */
   period: string;
   value: number;
+  /** consensus forecast going into the release, same display units (live layer) */
+  consensus?: number;
+  /** the "previous" the calendar showed at release time */
+  previous?: number;
+  /** day the print actually hit the tape, YYYY-MM-DD */
+  releaseDate?: string;
 }
 
 export interface IndicatorSeries {
@@ -271,7 +312,7 @@ export function indicatorInsight(spec: IndicatorSpec, stats: PrintStats): string
 /* ------------------------------- fetching ------------------------------- */
 
 const API = 'https://api.db.nomics.world/v22/series';
-const CACHE_KEY = 'ei-econ-cache-v5'; // v5: JOLTS id fix + print archive
+const CACHE_KEY = 'ei-econ-cache-v6'; // v6: FRED provider (PCE/retail), ISM seed, YoY defaults
 const FRESH_MS = 20 * 3600 * 1000;
 
 interface CacheShape {
@@ -379,27 +420,57 @@ async function fetchDbnomicsRaw(spec: IndicatorSpec): Promise<PrintPoint[]> {
   return [];
 }
 
+/**
+ * FRED relay (/api/fred): full official history for BEA/Census series (PCE,
+ * retail sales) that the BLS API does not carry. Same response shape as the
+ * BLS proxy, so the parser is shared.
+ */
+async function fetchFredProxy(series: string): Promise<PrintPoint[] | null> {
+  let res: Response;
+  try {
+    res = await fetch(`/api/fred?id=${encodeURIComponent(series)}`, { headers: { Accept: 'application/json' } });
+  } catch {
+    return null;
+  }
+  if (!res.ok) return null;
+  let json: unknown;
+  try {
+    json = await res.json();
+  } catch {
+    return null;
+  }
+  const raw = parseBlsProxy(json, series);
+  return raw.length >= 8 ? raw : null;
+}
+
 async function fetchIndicator(spec: IndicatorSpec): Promise<PrintPoint[]> {
   // BLS (current, via our proxy) provides the tail; DBnomics provides the deep
   // history. Merge so the chart has BOTH depth and a current last print — the
-  // proxy's ~3 recent years override the mirror's frozen tail.
+  // proxy's ~3 recent years override the mirror's frozen tail. FRED series
+  // (PCE, retail) come complete from one call.
   const blsSrc = spec.sources.find((s) => s.provider === 'BLS');
-  const [blsRaw, dbnRaw] = await Promise.all([
+  const fredSrc = spec.sources.find((s) => s.provider === 'FRED');
+  const [blsRaw, fredRaw, dbnRaw] = await Promise.all([
     blsSrc ? fetchBlsProxy(blsSrc.series) : Promise.resolve(null),
-    fetchDbnomicsRaw(spec),
+    fredSrc ? fetchFredProxy(fredSrc.series) : Promise.resolve(null),
+    spec.sources.some((s) => !['BLS', 'FRED'].includes(s.provider)) ? fetchDbnomicsRaw(spec) : Promise.resolve([]),
   ]);
 
+  const current = blsRaw ?? fredRaw;
   let raw: PrintPoint[] = [];
-  if (blsRaw && dbnRaw.length) raw = mergeRawByPeriod(dbnRaw, blsRaw);
-  else raw = (blsRaw && blsRaw.length ? blsRaw : dbnRaw);
+  if (current && dbnRaw.length) raw = mergeRawByPeriod(dbnRaw, current);
+  else raw = (current && current.length ? current : dbnRaw);
 
   if (raw.length >= 8) {
     const points = transformAndScale(raw, spec);
     if (points.length >= 4) return points;
   }
+  // last resort: the bundled official record (ISM) — already in display units
+  const seed = SEED_PRINTS[spec.id];
+  if (seed && seed.length >= 4) return seed;
   throw new Error(
-    blsSrc
-      ? 'Neither the official BLS proxy nor the mirror returned enough data. On the live site the proxy needs a moment on first load; try Refresh.'
+    blsSrc || fredSrc
+      ? 'Neither the official proxy nor the mirror returned enough data. On the live site the proxy needs a moment on first load; try Refresh.'
       : 'No data source responded.',
   );
 }
@@ -435,6 +506,10 @@ export async function loadIndicator(spec: IndicatorSpec, force = false): Promise
     } catch (e) {
       officialErr = e instanceof Error ? e.message : 'Fetch failed.';
     }
+  } else if (SEED_PRINTS[spec.id]) {
+    // no free API exists anywhere (ISM) — the bundled official record is the
+    // backbone; the live layer below extends it with each new release
+    official = SEED_PRINTS[spec.id];
   }
 
   let points = official;
@@ -473,6 +548,50 @@ export async function loadIndicator(spec: IndicatorSpec, force = false): Promise
     };
   }
   return { series: null, error: msg };
+}
+
+/* ----------------------- inflation stack cross-read ---------------------- */
+
+/**
+ * Pure, rules-based interpretation of the four inflation measures (all % y/y):
+ * where core PCE sits vs the Fed's 2% target, its 6-month direction, the
+ * CPI−PCE wedge, and whether the PPI pipeline leads the headline up or down.
+ */
+export function inflationStackRead(latest: Record<string, number | null>, pceSlope6m: number | null): string[] {
+  const out: string[] = [];
+  const pce = latest['pce-core-yoy'];
+  const cpi = latest['cpi-yoy'];
+  const ppi = latest['ppi-yoy'];
+  if (pce != null) {
+    const gap = pce - 2;
+    out.push(
+      Math.abs(gap) < 0.15
+        ? `Core PCE — the measure the Fed targets — is AT the 2% goal (${pce.toFixed(1)}%): every hot print from here is a wobble, not a regime change.`
+        : `Core PCE — the measure the Fed targets — is ${Math.abs(gap).toFixed(1)}pp ${gap > 0 ? 'ABOVE' : 'BELOW'} the 2% goal at ${pce.toFixed(1)}%; ${gap > 0 ? 'the cut path needs cooling prints to survive' : 'undershooting opens the door to faster cuts'}.`,
+    );
+  }
+  if (pceSlope6m != null && Math.abs(pceSlope6m) >= 0.1) {
+    out.push(
+      pceSlope6m < 0
+        ? `Direction: core PCE has FALLEN ~${Math.abs(pceSlope6m).toFixed(1)}pp over the last 6 months — disinflation intact, duration (ZN) and NQ get the benefit of the doubt on cool prints.`
+        : `Direction: core PCE has RISEN ~${pceSlope6m.toFixed(1)}pp over the last 6 months — re-acceleration risk; hot CPI/PPI prints will hit harder than usual.`,
+    );
+  }
+  if (cpi != null && pce != null && Math.abs(cpi - pce) >= 0.3) {
+    out.push(
+      `The CPI−PCE wedge is ${(cpi - pce).toFixed(1)}pp — mostly shelter and weighting. The market TRADES the CPI print (it comes first) but the Fed DECIDES on PCE: when they diverge, fade the CPI overreaction into the PCE release.`,
+    );
+  }
+  if (ppi != null && cpi != null) {
+    out.push(
+      ppi > cpi + 0.3
+        ? `Pipeline: PPI (${ppi.toFixed(1)}%) is running ABOVE CPI — upstream cost pressure that tends to reach consumer prices within 1–3 months; treat coming CPI consensus as too low.`
+        : ppi < cpi - 0.3
+          ? `Pipeline: PPI (${ppi.toFixed(1)}%) is running BELOW CPI — the pipeline is disinflating ahead of the headline; upside CPI surprises have a lower ceiling.`
+          : `Pipeline: PPI and CPI are moving together — no pipeline divergence to trade.`,
+    );
+  }
+  return out;
 }
 
 /* --------------------- the print study: implications --------------------- */

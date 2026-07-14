@@ -48,6 +48,8 @@ export const LIVE_PRINT_MATCHERS: Record<string, LiveMatcher> = {
   'retail-mm': { test: /retail sales\s*(mom|m\/m)/i, reject: /core|ex|yoy|y\/y|control/i, min: -20, max: 20 },
   'pce-core-mm': { test: /core pce.*(mom|m\/m)/i, min: -2, max: 2 },
   'pce-core-yoy': { test: /core pce.*(yoy|y\/y)/i, min: 0, max: 15 },
+  'pce-headline-yoy': { test: /pce price index.*(yoy|y\/y)/i, reject: /core/i, min: -2, max: 15 },
+  'ppi-yoy': { test: /(ppi|producer price).*(yoy|y\/y)/i, reject: /core|input|services/i, min: -10, max: 25 },
 };
 
 /** "0.3%" / "147K" / "7.769M" / "-12.5" → number in the ROW's units. */
@@ -91,7 +93,7 @@ export function periodForRelease(dateISO: string, periodLag = 1): string {
 export function recentPrintsFromRows(indicatorId: string, rows: LiveEventRow[]): PrintPoint[] {
   const m = LIVE_PRINT_MATCHERS[indicatorId];
   if (!m) return [];
-  const byPeriod = new Map<string, { date: string; value: number }>();
+  const byPeriod = new Map<string, PrintPoint & { releaseDate: string }>();
   for (const r of rows) {
     if (!r.actual || !m.test.test(r.name) || (m.reject && m.reject.test(r.name))) continue;
     const raw = rawValue(r.actual);
@@ -100,11 +102,16 @@ export function recentPrintsFromRows(indicatorId: string, rows: LiveEventRow[]):
     if (!isFinite(value) || value < m.min || value > m.max) continue;
     const period = periodForRelease(r.date, m.periodLag ?? 1);
     const prev = byPeriod.get(period);
-    if (!prev || r.date > prev.date) byPeriod.set(period, { date: r.date, value });
+    if (prev && r.date <= prev.releaseDate) continue;
+    // carry the calendar context so the UI can show actual vs forecast vs
+    // previous exactly like the calendar sites do
+    const cRaw = rawValue(r.consensus);
+    const pRaw = rawValue(r.previous);
+    const consensus = cRaw != null ? normalizeLiveValue(indicatorId, cRaw) : undefined;
+    const previous = pRaw != null ? normalizeLiveValue(indicatorId, pRaw) : undefined;
+    byPeriod.set(period, { period, value, releaseDate: r.date, ...(consensus != null && isFinite(consensus) ? { consensus } : {}), ...(previous != null && isFinite(previous) ? { previous } : {}) });
   }
-  return [...byPeriod.entries()]
-    .map(([period, v]) => ({ period, value: v.value }))
-    .sort((a, b) => a.period.localeCompare(b.period));
+  return [...byPeriod.values()].sort((a, b) => a.period.localeCompare(b.period));
 }
 
 /* -------------------------------- archive -------------------------------- */
@@ -138,11 +145,10 @@ export function archiveMerge(indicatorId: string, points: PrintPoint[]): PrintPo
   } catch {
     canPersist = false;
   }
-  const byPeriod = new Map<string, number>();
-  for (const p of stored) byPeriod.set(p.period, p.value);
-  for (const p of points) byPeriod.set(p.period, p.value);
-  const merged = [...byPeriod.entries()]
-    .map(([period, value]) => ({ period, value }))
+  const byPeriod = new Map<string, PrintPoint>();
+  for (const p of stored) byPeriod.set(p.period, p);
+  for (const p of points) byPeriod.set(p.period, p); // fresh point (with consensus/previous) wins
+  const merged = [...byPeriod.values()]
     .sort((a, b) => a.period.localeCompare(b.period))
     .slice(-60);
   if (canPersist && points.length) {

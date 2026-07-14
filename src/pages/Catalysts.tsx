@@ -7,6 +7,9 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  Legend,
+  Line,
+  LineChart,
   ReferenceArea,
   ReferenceLine,
   ResponsiveContainer,
@@ -24,7 +27,9 @@ import {
   fmtPeriod,
   fmtPrint,
   indicatorInsight,
+  INDICATORS,
   INDICATORS_BY_EVENT,
+  inflationStackRead,
   loadIndicator,
   NO_HISTORY_NOTE,
   PLAYBOOK_INSTRUMENTS,
@@ -300,6 +305,31 @@ function ProvenanceLine({ series }: { series: IndicatorSeries }) {
   );
 }
 
+/**
+ * The last release exactly as a calendar site frames it: actual vs forecast vs
+ * previous, with the surprise colored. Renders only when the live layer has
+ * seen the release (official-mirror-only points carry no consensus).
+ */
+function LatestReleaseStrip({ series }: { series: IndicatorSeries }) {
+  const spec = series.spec;
+  const last = series.points[series.points.length - 1];
+  if (!last || (last.consensus == null && last.previous == null)) return null;
+  const surprise = last.consensus != null ? last.value - last.consensus : null;
+  return (
+    <div className="row" style={{ gap: 16, flexWrap: 'wrap', alignItems: 'baseline', margin: '2px 0 10px', padding: '8px 10px', background: 'var(--gold-dim)', borderRadius: 8 }}>
+      <span className="small" style={{ fontWeight: 600 }}>Last release ({fmtPeriod(last.period)}{last.releaseDate ? ` · out ${last.releaseDate.slice(5)}` : ''})</span>
+      <span className="small">Actual <b className="mono" style={{ fontSize: 14 }}>{fmtPrint(last.value, spec, true)}</b></span>
+      {last.consensus != null && <span className="small muted">Forecast <b className="mono" style={{ color: 'var(--text)' }}>{fmtPrint(last.consensus, spec, true)}</b></span>}
+      {last.previous != null && <span className="small muted">Previous <b className="mono" style={{ color: 'var(--text)' }}>{fmtPrint(last.previous, spec, true)}</b></span>}
+      {surprise != null && (
+        <span className={`small mono ${surprise > 0 ? 'pos' : surprise < 0 ? 'neg' : 'muted'}`} style={{ fontWeight: 700 }}>
+          {surprise === 0 ? 'in line' : `${surprise > 0 ? 'beat +' : 'miss '}${fmtPrint(surprise, spec, true)}`}
+        </span>
+      )}
+    </div>
+  );
+}
+
 /** The last handful of prints as a table — the raw record behind the chart. */
 function RecentPrints({ series }: { series: IndicatorSeries }) {
   const spec = series.spec;
@@ -310,25 +340,44 @@ function RecentPrints({ series }: { series: IndicatorSeries }) {
     .slice(1)
     .reverse();
   const liveFrom = series.officialThrough;
+  const hasForecast = rows.some(({ p }) => p.consensus != null);
   return (
     <div style={{ marginTop: 12 }}>
       <div className="small muted" style={{ marginBottom: 6 }}>Recent prints — {spec.label} ({spec.unit})</div>
       <div style={{ overflowX: 'auto' }}>
-        <table className="data" style={{ minWidth: 380 }}>
+        <table className="data" style={{ minWidth: hasForecast ? 480 : 380 }}>
           <thead>
-            <tr><th>Period</th><th style={{ textAlign: 'right' }}>Print</th><th style={{ textAlign: 'right' }}>Δ vs prior</th><th>Source</th></tr>
+            <tr>
+              <th>Period</th>
+              <th style={{ textAlign: 'right' }}>Print</th>
+              {hasForecast && <th style={{ textAlign: 'right' }}>Forecast</th>}
+              {hasForecast && <th style={{ textAlign: 'right' }}>Surprise</th>}
+              <th style={{ textAlign: 'right' }}>Δ vs prior</th>
+              <th>Source</th>
+            </tr>
           </thead>
           <tbody>
-            {rows.map(({ p, d }) => (
-              <tr key={p.period}>
-                <td className="mono">{fmtPeriod(p.period)}</td>
-                <td className="mono" style={{ textAlign: 'right', fontWeight: 700 }}>{fmtPrint(p.value, spec, true)}</td>
-                <td className={`mono ${d != null && d > 0 ? 'pos' : d != null && d < 0 ? 'neg' : ''}`} style={{ textAlign: 'right' }}>
-                  {d != null ? fmtPrint(d, spec, true) : '—'}
-                </td>
-                <td className="muted small">{liveFrom != null && p.period > liveFrom ? 'live calendar' : liveFrom == null ? 'live calendar' : 'official'}</td>
-              </tr>
-            ))}
+            {rows.map(({ p, d }) => {
+              const surprise = p.consensus != null ? p.value - p.consensus : null;
+              return (
+                <tr key={p.period}>
+                  <td className="mono">{fmtPeriod(p.period)}</td>
+                  <td className="mono" style={{ textAlign: 'right', fontWeight: 700 }}>{fmtPrint(p.value, spec, true)}</td>
+                  {hasForecast && (
+                    <td className="mono muted" style={{ textAlign: 'right' }}>{p.consensus != null ? fmtPrint(p.consensus, spec, true) : '—'}</td>
+                  )}
+                  {hasForecast && (
+                    <td className={`mono ${surprise != null && surprise > 0 ? 'pos' : surprise != null && surprise < 0 ? 'neg' : ''}`} style={{ textAlign: 'right' }}>
+                      {surprise != null ? (surprise === 0 ? '0' : fmtPrint(surprise, spec, true)) : '—'}
+                    </td>
+                  )}
+                  <td className={`mono ${d != null && d > 0 ? 'pos' : d != null && d < 0 ? 'neg' : ''}`} style={{ textAlign: 'right' }}>
+                    {d != null ? fmtPrint(d, spec, true) : '—'}
+                  </td>
+                  <td className="muted small">{liveFrom != null && p.period > liveFrom ? 'live calendar' : liveFrom == null ? 'live calendar' : 'official'}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -565,6 +614,7 @@ function ReleaseIntel({ record, now }: { record: PerEventStat[]; now: number }) 
               {active.series.stale && (
                 <div className="muted small" style={{ marginBottom: 8 }}>Showing cached history — the latest refresh failed ({active.error}).</div>
               )}
+              <LatestReleaseStrip series={active.series} />
               {stats && activeSpec && (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 12 }}>
                   <StatTile
@@ -638,6 +688,116 @@ const FEED_CURRENCIES = ['USD', 'EUR', 'GBP', 'JPY'];
  * weekly feed (not just the curated tier-1 set) with impact, Lisbon time and
  * consensus → actual, refreshing every minute on trading days.
  */
+/* ------------------------- inflation cross-read -------------------------- */
+
+/**
+ * The four inflation measures on ONE axis (all % y/y) against the Fed's 2%
+ * target. This is the cross-read economists actually run: PPI is the pipeline
+ * (leads consumer prices by 1–3 months through the goods channel), CPI is the
+ * headline the public sees, core CPI strips food/energy noise, and core PCE is
+ * the measure the Fed literally targets — the one that moves the dot plot.
+ * Palette is CVD-validated against the app surface (4 hues, fixed assignment).
+ */
+const STACK_SERIES = [
+  { id: 'cpi-yoy', label: 'CPI', color: '#b5842c' },
+  { id: 'cpi-core-yoy', label: 'Core CPI', color: '#4f8fca' },
+  { id: 'pce-core-yoy', label: 'Core PCE', color: '#43a45c' },
+  { id: 'ppi-yoy', label: 'PPI', color: '#cc5f83' },
+] as const;
+
+function InflationStack() {
+  const [series, setSeries] = useState<Record<string, IndicatorSeries | null>>({});
+
+  useEffect(() => {
+    let alive = true;
+    for (const s of STACK_SERIES) {
+      const spec = INDICATORS.find((i) => i.id === s.id);
+      if (!spec) continue;
+      void loadIndicator(spec).then((r) => {
+        if (alive) setSeries((prev) => ({ ...prev, [s.id]: r.series }));
+      });
+    }
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const { rows, latest, slope } = useMemo(() => {
+    const byPeriod = new Map<string, Record<string, number | string>>();
+    for (const s of STACK_SERIES) {
+      const pts = series[s.id]?.points ?? [];
+      for (const p of pts.slice(-37)) {
+        const row = byPeriod.get(p.period) ?? { period: p.period };
+        row[s.id] = Number(p.value.toFixed(2));
+        byPeriod.set(p.period, row);
+      }
+    }
+    const rows = [...byPeriod.values()].sort((a, b) => String(a.period).localeCompare(String(b.period))).slice(-36);
+    const latest: Record<string, number | null> = {};
+    for (const s of STACK_SERIES) {
+      const pts = series[s.id]?.points ?? [];
+      latest[s.id] = pts.length ? pts[pts.length - 1].value : null;
+    }
+    const pce = series['pce-core-yoy']?.points ?? [];
+    let slope: number | null = null;
+    if (pce.length >= 7) {
+      slope = pce[pce.length - 1].value - pce[pce.length - 7].value;
+    }
+    return { rows, latest, slope };
+  }, [series]);
+
+  const loadedCount = STACK_SERIES.filter((s) => (series[s.id]?.points.length ?? 0) >= 4).length;
+  if (loadedCount < 2) return null;
+
+  const read = inflationStackRead(latest, slope);
+
+  return (
+    <div className="card">
+      <div className="card-title">
+        The inflation stack — crossing the measures{' '}
+        <span className="hint">PPI feeds CPI feeds PCE feeds the Fed — one chart, one axis, % y/y</span>
+      </div>
+      <ResponsiveContainer width="100%" height={240}>
+        <LineChart data={rows} margin={{ top: 8, right: 12, bottom: 0, left: -18 }}>
+          <CartesianGrid stroke="rgba(138,133,122,0.12)" vertical={false} />
+          <XAxis dataKey="period" stroke="transparent" tick={{ fill: '#8a857a', fontSize: 11 }} tickLine={false} minTickGap={46} tickFormatter={fmtPeriod} />
+          <YAxis stroke="transparent" tick={{ fill: '#8a857a', fontSize: 11 }} tickLine={false} tickFormatter={(v: number) => `${v}%`} />
+          <Tooltip
+            contentStyle={{ background: '#221f1b', border: '1px solid rgba(138,133,122,0.25)', borderRadius: 8, fontSize: 12 }}
+            labelFormatter={(p) => fmtPeriod(String(p))}
+            formatter={(v: number, name: string) => [`${Number(v).toFixed(1)}%`, STACK_SERIES.find((s) => s.id === name)?.label ?? name]}
+          />
+          <Legend formatter={(id: string) => <span style={{ color: '#c9c4b8', fontSize: 12 }}>{STACK_SERIES.find((s) => s.id === id)?.label ?? id}</span>} />
+          <ReferenceLine y={2} stroke="#8a857a" strokeDasharray="5 4" label={{ value: 'Fed 2% target', fill: '#8a857a', fontSize: 11, position: 'insideBottomRight' }} />
+          {STACK_SERIES.map((s) => (
+            <Line key={s.id} type="monotone" dataKey={s.id} stroke={s.color} strokeWidth={2} dot={false} connectNulls />
+          ))}
+        </LineChart>
+      </ResponsiveContainer>
+      <div className="row" style={{ gap: 16, flexWrap: 'wrap', marginTop: 4 }}>
+        {STACK_SERIES.map((s) => (
+          <span key={s.id} className="small">
+            <span className="grade-dot" style={{ background: s.color }} /> {s.label}:{' '}
+            <b className="mono">{latest[s.id] != null ? `${latest[s.id]!.toFixed(1)}%` : '—'}</b>
+          </span>
+        ))}
+      </div>
+      {read.length > 0 && (
+        <div className="stack" style={{ gap: 6, marginTop: 10 }}>
+          {read.map((r) => (
+            <div key={r.slice(0, 24)} className="small muted">• {r}</div>
+          ))}
+        </div>
+      )}
+      <p className="small" style={{ margin: '10px 0 0', color: 'var(--gold)' }}>
+        The transmission chain is the trade: PPI (pipeline) → CPI (headline) → core PCE (what the Fed acts on) → the
+        dot plot → ZN → equity multiples. Every inflation print you trade is one link of this chain updating — know
+        which link before the number hits.
+      </p>
+    </div>
+  );
+}
+
 function FullWeekFeed({ ws, today }: { ws: string; today: string }) {
   const [rows, setRows] = useState<LiveEventRow[]>([]);
   const [failed, setFailed] = useState(false);
@@ -852,6 +1012,7 @@ export default function Catalysts() {
         <SessionRadar events={dayEvents(today)} />
 
         <ReleaseIntel record={perEvent} now={now} />
+        <InflationStack />
 
         <div className="card">
           <div className="spread" style={{ alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 6 }}>

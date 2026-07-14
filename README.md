@@ -246,8 +246,21 @@ The Catalysts section doesn't just list NFP and CPI — it shows what each relea
   every segment is stated under the chart (official source, current to X · or · official history to
   X · extended with N live prints to Y), so you always know exactly where the numbers came from.
 
-Retail Sales and Core PCE, which have no free keyless mirror at all, build their history entirely
-from the live layer:
+- **Official PCE & retail-sales history, keyless** — PCE (the Fed's actual target measure) and
+  retail sales are BEA/Census releases the BLS API doesn't carry; they come complete from FRED's
+  keyless CSV endpoint through the app's own `/api/fred` relay (core PCE m/m + y/y, headline PCE
+  y/y, retail m/m). ISM has no free API anywhere — the app bundles the official print record from
+  ISM's own monthly releases (Jan 2025 onward) and the live layer extends it with each new print.
+- **Calendar-grade release framing** — the newest print shows exactly as calendar sites frame it:
+  **actual vs forecast vs previous with the surprise colored**, and the recent-prints table gains
+  forecast + surprise columns whenever the live layer saw the release. CPI opens on the **YoY**
+  view by default — the number the market quotes.
+- **The inflation stack — crossing the measures** — CPI, core CPI, core PCE and PPI (all % y/y) on
+  one axis against the Fed's 2% target, with a computed cross-read: how far core PCE sits from
+  target, its 6-month direction, the CPI−PCE wedge (trade the CPI print, but the Fed decides on
+  PCE), and whether the PPI pipeline is leading the headline up or down.
+
+Everything above needs no key at all; connecting one only upgrades the live layer:
 
 - **Print history charts** — 4 years of prints per indicator (payrolls change, unemployment, AHE,
   headline & core CPI m/m, core CPI y/y, PPI, JOLTS openings, both ISMs), with the ±1σ band and
@@ -302,12 +315,15 @@ to-the-second view of the trading day:
 ### Charts — TradingView inside the platform
 The Charts section embeds TradingView's free Advanced Chart widget: full price history, live
 updating quotes, and the complete drawing/indicator toolset, rendered in Lisbon time like the rest
-of the app. One-click chips cover the platform's instruments — ES, NQ, RTY, YM, ZN, ZB, 6E, GC, CL
-plus the real-time cash proxies (SPX, NDX, VIX, DXY) — with timeframe chips from 5m to weekly, and
-your last symbol/timeframe choice remembered. A teaching block explains how to combine the chart
-with the other sections (draw the dealer levels from Options & Vol, time-stamp the session opens
-and release times, use VWAP as fair value), and an honest data note: futures quotes on the free
-embed are ~10 min exchange-delayed, while the cash indices update in real time.
+of the app. One-click chips cover the platform's instruments (ES, NQ, RTY, YM, ZN, ZB, 6E, GC, CL,
+VIX, DXY) with timeframe chips from 5m to weekly; symbol, timeframe and feed choices are
+remembered. Because TradingView blocks many licensed exchange symbols (CME/CBOT) in free embeds
+("only available on TradingView"), each instrument defaults to a **24h proxy feed** — live
+CFD/spot/index markets (SPX500USD, NAS100USD, XAUUSD, USOIL, US10Y…) that track the futures
+tick-for-tick in shape and are always available — with a **Futures** toggle for the actual
+contract where the embed allows it. A teaching block explains how to combine the chart with the
+other sections (draw the dealer levels from Options & Vol, time-stamp the session opens and
+release times, use VWAP as fair value) and why the ZN/ZB yield proxies move inverse to price.
 
 ### Live day-ahead briefing
 The preparation page can connect a free market-data key (financialmodelingprep.com) and fills
