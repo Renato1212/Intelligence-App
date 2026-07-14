@@ -59,7 +59,9 @@ async function fetchV2(seriesIds, key) {
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Cache-Control', 's-maxage=86400, stale-while-revalidate=172800');
+  // 2h edge cache: long enough to stay far inside the keyless daily limit,
+  // short enough that a release-morning print reaches the app the same day.
+  res.setHeader('Cache-Control', 's-maxage=7200, stale-while-revalidate=86400');
 
   const series = cleanSeriesParam(req.query?.series);
   if (!series.length) {

@@ -13,6 +13,8 @@ import {
   ReferenceArea,
   ReferenceLine,
   ResponsiveContainer,
+  Scatter,
+  ScatterChart,
   Tooltip,
   XAxis,
   YAxis,
@@ -38,7 +40,15 @@ import {
   type IndicatorSpec,
   type PrintStats,
 } from '../lib/econData';
-import { staleGapMonths } from '../lib/econLive';
+import { getHistoricalRows, recentPrintsFromRows, staleGapMonths } from '../lib/econLive';
+import {
+  buildReactionRows,
+  fetchAllProxyCloses,
+  REACTION_PROXIES,
+  reactionStats,
+  reactionVerdict,
+  type ReactionRow,
+} from '../lib/reactionLab';
 import { loadReleaseDetail, RELEASE_DETAILS, type ReleaseDetailLoad } from '../lib/releaseDetail';
 import { eventDaySplit, perEventStats, proximitySplit, type PerEventStat } from '../lib/eventStats';
 import { fetchUSCalendarRange, getMarketApiKey, liveReadingsFor, parseReading, type LiveEventRow } from '../lib/market';
@@ -663,6 +673,8 @@ function ReleaseIntel({ record, now }: { record: PerEventStat[]; now: number }) 
 
       <ImplicationsStudy short={short} />
 
+      <ReactionLab short={short} spec={activeSpec} />
+
       <div className="small" style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--hairline)' }}>
         <b>Your record on {short} days:</b>{' '}
         {myRecord ? (
@@ -688,6 +700,155 @@ const FEED_CURRENCIES = ['USD', 'EUR', 'GBP', 'JPY'];
  * weekly feed (not just the curated tier-1 set) with impact, Lisbon time and
  * consensus → actual, refreshing every minute on trading days.
  */
+/* ------------------------------ reaction lab ------------------------------ */
+
+const HOT_COLOR = '#cc5f83';
+const COLD_COLOR = '#4f8fca';
+
+/**
+ * Surprise → realized same-day reaction, per instrument, from the trader's own
+ * market-data key. Tests the implications playbook against what actually
+ * happened on each past release.
+ */
+function ReactionLab({ short, spec }: { short: string; spec: IndicatorSpec | null }) {
+  const [state, setState] = useState<'loading' | 'unavailable' | 'ready'>('loading');
+  const [rows, setRows] = useState<ReactionRow[]>([]);
+  const pb = PRINT_PLAYBOOK[short];
+
+  useEffect(() => {
+    let alive = true;
+    if (!spec || !pb) {
+      setState('unavailable');
+      return;
+    }
+    setState('loading');
+    void (async () => {
+      const calRows = await getHistoricalRows(18);
+      const prints = calRows ? recentPrintsFromRows(spec.id, calRows).filter((p) => p.consensus != null && p.releaseDate) : [];
+      if (prints.length < 3) {
+        if (alive) setState('unavailable');
+        return;
+      }
+      const from = prints.reduce((min, p) => (p.releaseDate! < min ? p.releaseDate! : min), prints[0].releaseDate!);
+      const fromISO = new Date(new Date(from).getTime() - 7 * 86400000).toISOString().slice(0, 10);
+      const closes = await fetchAllProxyCloses(fromISO, new Date().toISOString().slice(0, 10));
+      if (!closes) {
+        if (alive) setState('unavailable');
+        return;
+      }
+      const built = buildReactionRows(prints, closes);
+      if (!alive) return;
+      setRows(built);
+      setState(built.length >= 3 ? 'ready' : 'unavailable');
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [short, spec?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!pb || state === 'unavailable') {
+    if (!pb) return null;
+    return (
+      <div style={{ marginTop: 14, paddingTop: 10, borderTop: '1px solid var(--hairline)' }}>
+        <div className="small" style={{ fontWeight: 600, color: 'var(--gold)' }}>Reaction Lab — surprise vs what the market actually did</div>
+        <div className="muted small">
+          Needs the market-data connection (free FMP key in Settings, or the FMP_API_KEY env var on the deployment) plus
+          a few releases of history — then every past {short} print is scored against the same-day ES/NQ/ZN/GC/CL/USD
+          reaction, and the implications map above gets graded by reality.
+        </div>
+      </div>
+    );
+  }
+  if (state === 'loading') {
+    return <div className="muted small" style={{ marginTop: 14 }}>Loading the reaction study…</div>;
+  }
+
+  const scores = reactionStats(rows, pb.hot);
+  const scatter = rows
+    .filter((r) => r.rets.SPY != null)
+    .map((r) => ({ x: Number(r.surprise.toFixed(3)), y: Number(r.rets.SPY!.toFixed(2)), hot: r.surprise > 0, period: r.period }));
+  const table = rows.slice(0, 8);
+  const f = (v: number | null | undefined, d = 2) => (v == null ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(d)}`);
+
+  return (
+    <div style={{ marginTop: 14, paddingTop: 10, borderTop: '1px solid var(--hairline)' }}>
+      <div className="small" style={{ fontWeight: 600, color: 'var(--gold)', marginBottom: 6 }}>
+        Reaction Lab — surprise vs what the market actually did{' '}
+        <span className="hint">same-day move per instrument on each past {short} release · your key&apos;s data</span>
+      </div>
+      <div className="row" style={{ gap: 18, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+        <div style={{ flex: '1 1 300px', minWidth: 280 }}>
+          <ResponsiveContainer width="100%" height={190}>
+            <ScatterChart margin={{ top: 8, right: 12, bottom: 4, left: -14 }}>
+              <CartesianGrid stroke="rgba(138,133,122,0.12)" />
+              <XAxis type="number" dataKey="x" name="surprise" stroke="transparent" tick={{ fill: '#8a857a', fontSize: 11 }} tickLine={false} />
+              <YAxis type="number" dataKey="y" name="ES reaction" stroke="transparent" tick={{ fill: '#8a857a', fontSize: 11 }} tickLine={false} tickFormatter={(v: number) => `${v}%`} />
+              <ReferenceLine x={0} stroke="#8a857a" strokeDasharray="4 4" />
+              <ReferenceLine y={0} stroke="#8a857a" strokeDasharray="4 4" />
+              <Tooltip
+                cursor={{ strokeDasharray: '3 3' }}
+                contentStyle={{ background: '#221f1b', border: '1px solid rgba(138,133,122,0.25)', borderRadius: 8, fontSize: 12 }}
+                formatter={(v: number, name: string) => [name === 'ES reaction' ? `${v}%` : v, name]}
+                labelFormatter={() => ''}
+              />
+              <Scatter data={scatter} shape="circle">
+                {scatter.map((p) => (
+                  <Cell key={p.period} fill={p.hot ? HOT_COLOR : COLD_COLOR} />
+                ))}
+              </Scatter>
+            </ScatterChart>
+          </ResponsiveContainer>
+          <div className="row" style={{ gap: 14, marginTop: 2 }}>
+            <span className="small"><span className="grade-dot" style={{ background: HOT_COLOR }} /> hot surprise</span>
+            <span className="small"><span className="grade-dot" style={{ background: COLD_COLOR }} /> cold surprise</span>
+            <span className="small muted">x = surprise ({spec?.unit ?? ''}) · y = same-day ES move</span>
+          </div>
+        </div>
+        <div style={{ flex: '1 1 380px', minWidth: 0, overflowX: 'auto' }}>
+          <table className="data" style={{ minWidth: 560 }}>
+            <thead>
+              <tr>
+                <th>Release</th>
+                <th style={{ textAlign: 'right' }}>Actual</th>
+                <th style={{ textAlign: 'right' }}>Fcst</th>
+                <th style={{ textAlign: 'right' }}>Surpr.</th>
+                {REACTION_PROXIES.map((p) => <th key={p.sym} style={{ textAlign: 'right' }}>{p.label}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {table.map((r) => (
+                <tr key={r.releaseDate}>
+                  <td className="mono">{r.releaseDate.slice(5)}</td>
+                  <td className="mono" style={{ textAlign: 'right', fontWeight: 700 }}>{f(r.actual)}</td>
+                  <td className="mono muted" style={{ textAlign: 'right' }}>{f(r.consensus)}</td>
+                  <td className={`mono ${r.surprise > 0 ? 'pos' : r.surprise < 0 ? 'neg' : ''}`} style={{ textAlign: 'right' }}>{f(r.surprise)}</td>
+                  {REACTION_PROXIES.map((p) => {
+                    const v = r.rets[p.sym];
+                    return (
+                      <td key={p.sym} className={`mono ${v != null && v > 0 ? 'pos' : v != null && v < 0 ? 'neg' : ''}`} style={{ textAlign: 'right' }}>
+                        {v == null ? '—' : `${f(v, 1)}%`}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div className="row" style={{ gap: 14, flexWrap: 'wrap', marginTop: 8 }}>
+        {scores.filter((s) => s.scored > 0).map((s) => (
+          <span key={s.sym} className="small muted">
+            {s.label}: playbook held <b className="mono" style={{ color: 'var(--text)' }}>{s.agree}/{s.scored}</b>
+            {s.hotAvg != null && <> · hot avg <b className="mono" style={{ color: 'var(--text)' }}>{f(s.hotAvg, 1)}%</b></>}
+          </span>
+        ))}
+      </div>
+      <p className="small" style={{ margin: '8px 0 0', color: 'var(--gold)' }}>{reactionVerdict(scores, short)}</p>
+    </div>
+  );
+}
+
 /* ------------------------- inflation cross-read -------------------------- */
 
 /**
