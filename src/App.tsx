@@ -3,6 +3,7 @@ import { NavLink, Route, Routes } from 'react-router-dom';
 import { AuthGate } from './components/AuthGate';
 import { ToastProvider } from './components/ui';
 import { currentUser, isLocalOnly, onSyncState, supabase, type SyncState } from './lib/cloud';
+import { extractKeyFromHash, setMarketApiKey } from './lib/market';
 import Dashboard from './pages/Dashboard';
 import Trades from './pages/Trades';
 import TradeDetail from './pages/TradeDetail';
@@ -100,6 +101,16 @@ export default function App() {
 }
 
 function Shell() {
+  // One-click key connect: opening …/#/settings?fmpkey=XXX stores the key and
+  // scrubs it from the URL/history so it never lingers in the address bar.
+  useEffect(() => {
+    const key = extractKeyFromHash(window.location.hash);
+    if (key) {
+      setMarketApiKey(key);
+      window.history.replaceState(null, '', `${window.location.pathname}#/settings`);
+    }
+  }, []);
+
   return (
     <>
       <div className="shell">

@@ -67,6 +67,16 @@ export function setMarketApiKey(key: string): void {
   else localStorage.removeItem(KEY_STORAGE);
 }
 
+/**
+ * One-click key connect: pull an FMP key out of the URL hash
+ * (…/#/anything?fmpkey=XXXX). Lets the key be delivered as a link the trader
+ * just opens on each device — no copy-pasting into a form. Pure, testable.
+ */
+export function extractKeyFromHash(hash: string): string | null {
+  const m = /[?&]fmpkey=([A-Za-z0-9]{16,64})\b/.exec(String(hash || ''));
+  return m ? m[1] : null;
+}
+
 /** The risk-sense dashboard as free-tier-accessible ETF proxies. */
 const QUOTE_SYMBOLS: { symbol: string; label: string }[] = [
   { symbol: 'SPY', label: 'S&P 500' },

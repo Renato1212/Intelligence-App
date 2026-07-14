@@ -260,6 +260,15 @@ The Catalysts section doesn't just list NFP and CPI — it shows what each relea
   target, its 6-month direction, the CPI−PCE wedge (trade the CPI print, but the Fed decides on
   PCE), and whether the PPI pipeline is leading the headline up or down.
 
+- **Reaction Lab — surprise × what the market actually did** — with the market-data connection,
+  every past release of the selected event is scored: actual vs forecast (the surprise) crossed
+  with the **same-day move of six liquid proxies** (SPY→ES, QQQ→NQ, TLT→ZN, GLD→GC, USO→CL,
+  UUP→USD). A scatter (surprise vs ES reaction), a per-release reaction table, per-leg
+  "playbook held N/M" scores and a computed verdict grade the implications map against reality —
+  size where the mapping is consistent, distrust it where it's a coin flip.
+- **One-click key connect** — opening `…/#/settings?fmpkey=YOURKEY` on any device stores the key
+  and scrubs it from the URL; no form filling. (Or set `FMP_API_KEY` once on the deployment.)
+
 Everything above needs no key at all; connecting one only upgrades the live layer:
 
 - **Print history charts** — 4 years of prints per indicator (payrolls change, unemployment, AHE,
