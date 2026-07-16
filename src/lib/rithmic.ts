@@ -31,6 +31,14 @@ export interface RithmicConn {
   env: 'test' | 'paper' | 'live';
   /** wss:// gateway address (prefilled for test; from your dev kit otherwise) */
   gatewayUrl: string;
+  /**
+   * The application identity Rithmic permissions the login against. Rithmic
+   * ties access to (user, system, app) — a third-party app like MotiveWave
+   * works because ITS app_name is registered/conformed. Leave blank to use the
+   * app's own name; set the one your broker/Rithmic authorized for your login
+   * if you get "permission denied".
+   */
+  appName?: string;
 }
 
 export interface RithmicEnv {
@@ -94,6 +102,7 @@ export function unpackConn(raw: string | null): RithmicConn | null {
       systemName: typeof c.systemName === 'string' ? c.systemName : '',
       env,
       gatewayUrl: typeof c.gatewayUrl === 'string' ? c.gatewayUrl : '',
+      appName: typeof c.appName === 'string' && c.appName.trim() ? c.appName.trim() : undefined,
     };
   } catch {
     return null;
