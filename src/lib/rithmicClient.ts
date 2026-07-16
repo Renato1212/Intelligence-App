@@ -162,7 +162,13 @@ export class RProtocolClient {
     return this.armed;
   }
 
-  connect(): void {
+  /**
+   * Connect to the gateway. With `systemsOnly`, request the available system
+   * list and stop — no credentials are sent, so it works even before login is
+   * sorted out and is the safe way to discover the exact system name for your
+   * account (Rithmic closes the socket after answering).
+   */
+  connect(systemsOnly = false): void {
     if (!/^wss:\/\//i.test(this.conn.gatewayUrl.trim())) {
       this.setState('error', 'Gateway must be a wss:// address.');
       return;
@@ -178,6 +184,11 @@ export class RProtocolClient {
     ws.binaryType = 'arraybuffer';
     this.ws = ws;
     ws.onopen = () => {
+      if (systemsOnly) {
+        this.setState('systems');
+        this.send(16, { userMsg: ['list'] });
+        return;
+      }
       this.setState('logging-in');
       this.send(10, this.loginFields());
     };
@@ -214,7 +225,9 @@ export class RProtocolClient {
       templateVersion: TEMPLATE_VERSION,
       user: this.conn.user,
       password: this.conn.password,
-      appName: APP_NAME,
+      // Rithmic permissions on (user, system, app). A blank appName uses ours;
+      // set the broker/Rithmic-authorized one to clear "permission denied".
+      appName: this.conn.appName?.trim() || APP_NAME,
       appVersion: APP_VERSION,
       systemName: this.conn.systemName || 'Rithmic Test',
       infraType: INFRA.ORDER_PLANT, // order plant carries orders, accounts, and pushes
@@ -265,7 +278,10 @@ export class RProtocolClient {
       case 11: { // ResponseLogin
         const rp = (msg.rpCode as string[]) ?? [];
         if (rp[0] && rp[0] !== '0') {
-          this.setState('error', `Login rejected: ${rp.join(' ')}`);
+          // Rithmic explains the denial in user_msg (e.g. "permission denied",
+          // "invalid system name") — surface the full text, not just the code
+          const reason = [...((msg.userMsg as string[]) ?? []), ...rp.slice(1)].filter(Boolean).join(' · ');
+          this.setState('error', `Login rejected${reason ? `: ${reason}` : ` (code ${rp[0]})`}`);
           return;
         }
         this.fcmId = String(msg.fcmId ?? '');
