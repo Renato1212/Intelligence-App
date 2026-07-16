@@ -24,6 +24,7 @@ import {
   type ProbeResult,
   type RithmicConn,
 } from '../lib/rithmic';
+import { RProtocolClient } from '../lib/rithmicClient';
 
 function RithmicConnection() {
   const toast = useToast();
@@ -33,10 +34,13 @@ function RithmicConnection() {
   const [env, setEnv] = useState<RithmicConn['env']>(saved?.env ?? 'test');
   const [gatewayUrl, setGatewayUrl] = useState(saved?.gatewayUrl ?? RITHMIC_ENVS[0].defaultUrl);
   const [systemName, setSystemName] = useState(saved?.systemName ?? '');
+  const [appName, setAppName] = useState(saved?.appName ?? '');
   const [probe, setProbe] = useState<ProbeResult | null>(null);
   const [probing, setProbing] = useState(false);
+  const [discovered, setDiscovered] = useState<string[] | null>(null);
+  const [discovering, setDiscovering] = useState(false);
 
-  const current = (): RithmicConn => ({ user, password, systemName, env, gatewayUrl });
+  const current = (): RithmicConn => ({ user, password, systemName, env, gatewayUrl, appName: appName.trim() || undefined });
   const steps = connectionReadiness(user || password || gatewayUrl ? current() : loadConn());
 
   const pickEnv = (id: RithmicConn['env']) => {
@@ -64,6 +68,29 @@ function RithmicConnection() {
     } finally {
       setProbing(false);
     }
+  };
+
+  /** Ask the gateway for its available system names — no credentials sent. */
+  const discoverSystems = () => {
+    if (!/^wss:\/\//i.test(gatewayUrl.trim())) { toast('Enter a wss:// gateway first.'); return; }
+    setDiscovering(true);
+    setDiscovered(null);
+    const client = new RProtocolClient(current());
+    const timeout = setTimeout(() => { setDiscovering(false); client.disconnect(); toast('No response from the gateway — check the address.'); }, 12000);
+    const off = client.on((e) => {
+      if (e.type === 'systems') {
+        clearTimeout(timeout);
+        setDiscovered(e.systems);
+        setDiscovering(false);
+        off();
+        client.disconnect();
+      } else if (e.type === 'state' && e.state === 'error') {
+        clearTimeout(timeout);
+        setDiscovering(false);
+        off();
+      }
+    });
+    client.connect(true); // systems-only: no login, no credentials sent
   };
 
   const envMeta = RITHMIC_ENVS.find((e) => e.id === env)!;
@@ -133,11 +160,23 @@ function RithmicConnection() {
           style={{ flex: '1 1 180px', minWidth: 180, padding: '8px 10px', background: 'var(--surface)', border: '1px solid var(--hairline)', borderRadius: 6, color: 'var(--text)' }}
         />
       </div>
+      <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+        <input
+          value={appName}
+          onChange={(e) => setAppName(e.target.value)}
+          placeholder="app name — only if your broker/Rithmic gave you one (fixes ‘permission denied’)"
+          autoComplete="off"
+          style={{ flex: 1, minWidth: 260, padding: '8px 10px', background: 'var(--surface)', border: '1px solid var(--hairline)', borderRadius: 6, color: 'var(--text)' }}
+        />
+      </div>
 
       <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         <button className="btn primary" onClick={save}>{user.trim() || password.trim() ? 'Save on this device' : 'Remove saved connection'}</button>
         <button className="btn" disabled={probing || !gatewayUrl.trim()} onClick={() => void runProbe()}>
           {probing ? 'Testing…' : 'Test gateway reachability'}
+        </button>
+        <button className="btn" disabled={discovering || !gatewayUrl.trim()} onClick={discoverSystems}>
+          {discovering ? 'Asking…' : 'List systems'}
         </button>
         {probe && (
           <span className="small" style={{ color: probe.reachable ? 'var(--profit)' : 'var(--loss)' }}>
@@ -145,6 +184,22 @@ function RithmicConnection() {
           </span>
         )}
       </div>
+
+      {discovered && (
+        <div className="small" style={{ marginTop: 8 }}>
+          {discovered.length ? (
+            <>
+              <b>Systems on this gateway:</b>{' '}
+              {discovered.map((s) => (
+                <span key={s} className="chip clickable" style={{ marginRight: 4 }} onClick={() => setSystemName(s)}>{s}</span>
+              ))}
+              <div className="muted" style={{ marginTop: 4 }}>Tap the one MotiveWave uses to set it as your system name.</div>
+            </>
+          ) : (
+            <span className="muted">The gateway returned no systems — check the address, then try again.</span>
+          )}
+        </div>
+      )}
 
       {steps[0].done && steps[1].done && (
         <div className="small" style={{ marginTop: 12 }}>
