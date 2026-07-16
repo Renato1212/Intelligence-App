@@ -351,6 +351,24 @@ contract where the embed allows it. A teaching block explains how to combine the
 other sections (draw the dealer levels from Options & Vol, time-stamp the session opens and
 release times, use VWAP as fair value) and why the ZN/ZB yield proxies move inverse to price.
 
+### Trade Desk — live trading on Rithmic, in the browser
+With the R | Protocol dev kit in hand, the platform now speaks Rithmic's wire protocol directly:
+an original, dependency-free Protocol Buffers codec (`rithmicWire.ts`, byte-tested against known
+vectors) and a WebSocket client (`rithmicClient.ts`) implement the real handshake — connect →
+login (order plant) → accounts / trade routes → live market data → order submission → order & fill
+notifications — exactly as Rithmic's own sample does, one protobuf message per binary frame. None
+of Rithmic's licensed files are bundled; only the open wire format and the protocol's field
+numbers are used, and the dev kit is git-ignored.
+
+The **Trade Desk** page (`/desk`, under Execution) is the trading surface: connect with the
+credentials saved in Settings, stream a contract's live last / bid / ask, see your accounts and
+trade routes, and place Market / Limit / Stop / Stop-limit orders with Day/GTC/IOC/FOK duration.
+Safety is structural, not cosmetic: orders are staged locally, **live submission is refused until
+you explicitly arm it**, every order is **confirmed in a dialog** before it leaves the browser
+(with a bright PRODUCTION warning on the live environment), and the full order/fill notification
+stream is shown so nothing happens invisibly. Trade the Test/Paper system until the flow is
+second nature — the wire is identical to production.
+
 ### Trading connection — Rithmic (Settings)
 Rithmic's **R | Protocol API** is WebSockets + protocol buffers and is designed to run in web
 browsers, so the app can talk to the R | Trade Execution Platform directly. What Rithmic gates is

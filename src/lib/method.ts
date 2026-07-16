@@ -198,6 +198,11 @@ export const CONNECTS: Record<string, Connection[]> = {
     { route: '/optvol', label: 'Options & Vol', why: 'the session flow map and the dealer levels are the same mechanics seen from time vs price' },
     { route: '/analytics', label: 'Edge Analytics', why: 'your timing heatmap shows which of these windows actually pays you' },
   ],
+  tradedesk: [
+    { route: '/terminal', label: 'Edge Terminal', why: 'read the regime and the rails on the Terminal BEFORE you stage an order here' },
+    { route: '/day', label: 'Preparation', why: 'your IF-THEN plan and risk limit live here — execute the plan, do not improvise at the ticket' },
+    { route: '/risk', label: 'Risk Guardrail', why: 'know today\'s loss limit and safe size before you arm live trading' },
+  ],
   terminal: [
     { route: '/catalysts', label: 'Catalysts', why: 'the Terminal names today\'s scheduled risk — the deep print study and playbook live here' },
     { route: '/optvol', label: 'Options & Vol', why: 'the regime and rails on the Terminal come from this section\'s full gamma/vol machinery' },

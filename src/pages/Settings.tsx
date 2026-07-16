@@ -146,6 +146,12 @@ function RithmicConnection() {
         )}
       </div>
 
+      {steps[0].done && steps[1].done && (
+        <div className="small" style={{ marginTop: 12 }}>
+          Ready to trade — open the <Link to="/desk" style={{ color: 'var(--gold)', fontWeight: 600 }}>Trade Desk →</Link> to connect live, stream quotes and place orders (safety-gated).
+        </div>
+      )}
+
       <div className="muted small" style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--hairline)' }}>
         <b>The honest map:</b> your credentials are stored on this device only (never cloud-synced, excluded from
         backups and cache clears). The browser can already reach Rithmic gateways — the production login handshake
