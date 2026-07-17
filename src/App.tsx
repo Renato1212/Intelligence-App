@@ -15,6 +15,7 @@ import OptionsVol from './pages/OptionsVol';
 import Sessions from './pages/Sessions';
 import Charts from './pages/Charts';
 import Terminal from './pages/Terminal';
+import Ideas from './pages/Ideas';
 import TradeDesk from './pages/TradeDesk';
 import Method from './pages/Method';
 import Journal from './pages/Journal';
@@ -46,6 +47,7 @@ const I = {
   charts: <path d="M7 5v3M7 16v3M5 8h4v8H5zM17 2v3M17 18v3M15 5h4v13h-4z" />,
   terminal: <path d="M3 4h18v13H3zM3 8h18M7 12l2 2-2 2M12 16h5M8 21h8" />,
   tradedesk: <path d="M3 3v18h18M7 15l3-4 3 3 5-7M18 7h3v3" />,
+  ideas: <path d="M12 2a7 7 0 00-4 12.7c.6.5 1 1.5 1 2.3h6c0-.8.4-1.8 1-2.3A7 7 0 0012 2zM9 20h6M10 23h4" />,
   method: <path d="M4 6h16M4 12h10M4 18h7M18 15l3 3-3 3" />,
   risk: <path d="M12 2l8 4v6c0 5-3.4 8.5-8 10-4.6-1.5-8-5-8-10V6l8-4zM12 8v4M12 16h.01" />,
   account: <path d="M12 12a4 4 0 100-8 4 4 0 000 8zM4 21c0-4.4 3.6-8 8-8s8 3.6 8 8" />,
@@ -132,6 +134,7 @@ function Shell() {
           <Nav to="/risk" icon={I.risk} label="Risk Guardrail" />
           <div className="nav-section">Markets</div>
           <Nav to="/terminal" icon={I.terminal} label="Edge Terminal" />
+          <Nav to="/ideas" icon={I.ideas} label="Conviction Board" />
           <Nav to="/intel" icon={I.intel} label="Market Intel" />
           <Nav to="/macro" icon={I.macro} label="Macro Map" />
           <Nav to="/optvol" icon={I.optvol} label="Options & Vol" />
@@ -166,6 +169,7 @@ function Shell() {
             <Route path="/sessions" element={<Sessions />} />
             <Route path="/charts" element={<Charts />} />
             <Route path="/terminal" element={<Terminal />} />
+            <Route path="/ideas" element={<Ideas />} />
             <Route path="/desk" element={<TradeDesk />} />
             <Route path="/trades" element={<Trades />} />
             <Route path="/trades/:id" element={<TradeDetail />} />

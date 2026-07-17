@@ -203,6 +203,12 @@ export const CONNECTS: Record<string, Connection[]> = {
     { route: '/day', label: 'Preparation', why: 'your IF-THEN plan and risk limit live here — execute the plan, do not improvise at the ticket' },
     { route: '/risk', label: 'Risk Guardrail', why: 'know today\'s loss limit and safe size before you arm live trading' },
   ],
+  ideas: [
+    { route: '/terminal', label: 'Edge Terminal', why: 'the regime read is the backdrop every idea trades inside — check they agree before sizing' },
+    { route: '/catalysts', label: 'Catalysts', why: 'data-domain ideas fire around scheduled prints — the deep print study and playbook live here' },
+    { route: '/desk', label: 'Trade Desk', why: 'when a trigger prints, stage the order on the DOM and let auto-record capture the execution' },
+    { route: '/day', label: 'Preparation', why: 'copy the idea\'s trigger/invalidation into your IF-THEN plan — the board proposes, your prep disposes' },
+  ],
   terminal: [
     { route: '/catalysts', label: 'Catalysts', why: 'the Terminal names today\'s scheduled risk — the deep print study and playbook live here' },
     { route: '/optvol', label: 'Options & Vol', why: 'the regime and rails on the Terminal come from this section\'s full gamma/vol machinery' },
