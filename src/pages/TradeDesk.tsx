@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Connects } from '../components/Connects';
+import { DomLadder } from '../components/DomLadder';
 import { Principle, useToast } from '../components/ui';
+import { browserRecorder, downloadBlob, type RecState, type TradeRecorder } from '../lib/screenRecord';
 import { loadConn, RITHMIC_ENVS } from '../lib/rithmic';
 import {
   notifyLabel,
@@ -64,16 +66,25 @@ export default function TradeDesk() {
   const [duration, setDuration] = useState<OrderTicket['duration']>('DAY');
   const [confirm, setConfirm] = useState<OrderTicket | null>(null);
 
-  useEffect(() => () => clientRef.current?.disconnect(), []);
+  // client instance for the DOM to attach to (state so the ladder re-mounts on connect)
+  const [client, setClient] = useState<RProtocolClient | null>(null);
+
+  // auto screen recording
+  const recorderRef = useRef<TradeRecorder | null>(null);
+  const [recState, setRecState] = useState<RecState>('off');
+  const [autoRecord, setAutoRecord] = useState(false);
+  const [clips, setClips] = useState<string[]>([]);
+
+  useEffect(() => () => { clientRef.current?.disconnect(); recorderRef.current?.disarm(); }, []);
 
   const connect = () => {
     if (!conn) {
       toast('Save your Rithmic connection in Settings first.');
       return;
     }
-    const client = new RProtocolClient(conn);
-    clientRef.current = client;
-    client.on((e) => {
+    const c = new RProtocolClient(conn);
+    clientRef.current = c;
+    c.on((e) => {
       if (e.type === 'state') { setState(e.state); if (e.detail) setDetail(e.detail); }
       else if (e.type === 'systems') setSystems(e.systems);
       else if (e.type === 'account') setAccounts((a) => (a.some((x) => x.accountId === e.account.accountId) ? a : [...a, e.account]));
@@ -82,13 +93,53 @@ export default function TradeDesk() {
       else if (e.type === 'order') setOrders((o) => [e.update, ...o].slice(0, 40));
       else if (e.type === 'log') setLog((l) => [e.message, ...l].slice(0, 12));
     });
-    client.connect();
+    setClient(c);
+    c.connect();
   };
 
   const disconnect = () => {
     clientRef.current?.disconnect();
     clientRef.current = null;
+    setClient(null);
     setArmed(false);
+  };
+
+  /* ---------------------------- screen recording -------------------------- */
+  const recorder = (): TradeRecorder => {
+    if (!recorderRef.current) {
+      recorderRef.current = browserRecorder((blob, name) => {
+        // save the WebM to the browser's downloads AND list it in-session
+        downloadBlob(blob, name);
+        setClips((cs) => [name, ...cs].slice(0, 20));
+      });
+    }
+    return recorderRef.current;
+  };
+  const toggleAutoRecord = async () => {
+    const r = recorder();
+    if (autoRecord) {
+      r.disarm();
+      setAutoRecord(false);
+      setRecState('off');
+      toast('Auto-record off');
+      return;
+    }
+    const err = await r.arm();
+    if (err) { toast(err); return; }
+    setAutoRecord(true);
+    setRecState(r.state);
+    toast('Auto-record armed — choose the screen/window to capture. A clip starts on each entry.');
+  };
+  const stopClip = () => {
+    recorder().stopClip();
+    setRecState('armed');
+  };
+  /** Start a clip when a position is initiated (if auto-record is armed). */
+  const recordEntry = (sym: string, entrySide: string) => {
+    const r = recorderRef.current;
+    if (r && r.isArmed() && r.state !== 'recording') {
+      if (r.startClip(sym, entrySide)) setRecState('recording');
+    }
   };
 
   const toggleArm = () => {
@@ -129,9 +180,23 @@ export default function TradeDesk() {
     const c = clientRef.current;
     if (!c || !confirm) return;
     const err = c.submitOrder(confirm);
+    if (err) { setConfirm(null); toast(err); return; }
+    // a position is being initiated — auto-record it
+    recordEntry(confirm.symbol, confirm.side);
     setConfirm(null);
-    if (err) toast(err);
-    else toast('Order sent to Rithmic.');
+    toast('Order sent to Rithmic.');
+  };
+
+  /** Click-trading from the DOM ladder — prefill a limit ticket at that price. */
+  const ladderOrder = (p: number, s: 'BUY' | 'SELL') => {
+    setSide(s);
+    setPriceType('LIMIT');
+    setPrice(String(p));
+    if (!armed) { toast(`Staged ${s} limit @ ${p}. Arm live trading, then Review.`); return; }
+    const t = { ...ticket(), side: s, priceType: 'LIMIT' as const, price: p };
+    const err = validateTicket(t);
+    if (err) { toast(err); return; }
+    setConfirm(t);
   };
 
   const watched = () => {
@@ -198,6 +263,36 @@ export default function TradeDesk() {
         <div className="card small">
           <b>Available systems:</b> {systems.join(' · ')} <span className="muted">— set the matching system name in Settings if login is rejected.</span>
         </div>
+      )}
+
+      {/* auto screen-recording */}
+      <div className="card" style={{ borderLeft: `4px solid ${recState === 'recording' ? 'var(--loss)' : recState === 'armed' ? 'var(--gold)' : 'var(--hairline)'}` }}>
+        <div className="spread" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+          <div className="small">
+            <b>Auto record</b>{' '}
+            {recState === 'recording' && <span className="chip" style={{ background: 'var(--loss)', color: '#141210', fontWeight: 700 }}>● REC</span>}
+            {recState === 'armed' && <span className="chip" style={{ background: 'var(--gold)', color: '#141210', fontWeight: 700 }}>armed</span>}
+            <div className="muted" style={{ marginTop: 3 }}>
+              {autoRecord
+                ? 'A screen video starts automatically the moment you send an order, and saves as a WebM clip when you stop it. One permission prompt covers the whole session.'
+                : 'Turn on to capture a screen recording of every position you initiate — for your trade review. You pick the screen/window once.'}
+            </div>
+          </div>
+          <div className="row" style={{ gap: 8 }}>
+            {recState === 'recording' && <button className="btn" onClick={stopClip} style={{ borderColor: 'var(--loss)', color: 'var(--loss)' }}>Stop &amp; save clip</button>}
+            <button className="btn" onClick={() => void toggleAutoRecord()} style={autoRecord ? { borderColor: 'var(--gold)', color: 'var(--gold)' } : undefined}>
+              {autoRecord ? 'Turn off auto-record' : 'Enable auto-record'}
+            </button>
+          </div>
+        </div>
+        {clips.length > 0 && (
+          <div className="muted small" style={{ marginTop: 8 }}>Saved this session: {clips.slice(0, 4).join(' · ')}{clips.length > 4 ? ` +${clips.length - 4}` : ''}</div>
+        )}
+      </div>
+
+      {/* depth of market */}
+      {client && ready && (
+        <DomLadder client={client} symbol={symbol.trim().toUpperCase()} exchange={exchange.trim().toUpperCase()} onLadderOrder={ladderOrder} />
       )}
 
       <div className="grid grid-2" style={{ gap: 14, alignItems: 'start' }}>
