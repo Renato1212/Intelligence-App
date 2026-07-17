@@ -102,6 +102,47 @@ export function parseFmpDaily(json: unknown): { date: string; close: number; vol
   return out.sort((a, b) => a.date.localeCompare(b.date));
 }
 
+export interface OhlcBar {
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number | null;
+}
+
+/**
+ * Full-OHLC daily bar candidates (the light route above only carries closes).
+ * Same stable-first / legacy-fallback ordering as fmpDailyBarUrls.
+ */
+export function fmpOhlcBarUrls(symbol: string, opts: { from?: string; to?: string } = {}): string[] {
+  const to = opts.to ?? new Date().toISOString().slice(0, 10);
+  const from = opts.from ?? new Date(Date.now() - 200 * 86400000).toISOString().slice(0, 10);
+  const stable = `stable/historical-price-eod/full?symbol=${symbol}&from=${from}&to=${to}`;
+  const legacy = `api/v3/historical-price-full/${symbol}?from=${from}&to=${to}`;
+  return [...fmpUrls(stable), ...fmpUrls(legacy)];
+}
+
+/** Pure: parse full OHLC bars from either payload shape (stable bare array or
+ * legacy {historical:[…]}). Ascending by date; rows missing any of OHLC drop. */
+export function parseFmpOhlc(json: unknown): OhlcBar[] {
+  const rows = Array.isArray(json) ? json : (json as { historical?: unknown[] })?.historical;
+  if (!Array.isArray(rows)) return [];
+  const out: OhlcBar[] = [];
+  for (const r of rows as Record<string, unknown>[]) {
+    const date = String(r.date ?? '').slice(0, 10);
+    const open = Number(r.open);
+    const high = Number(r.high);
+    const low = Number(r.low);
+    const close = Number(r.close ?? r.price);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+    if (![open, high, low, close].every((v) => isFinite(v) && v > 0)) continue;
+    const vol = Number(r.volume);
+    out.push({ date, open, high, low, close, volume: isFinite(vol) && vol > 0 ? vol : null });
+  }
+  return out.sort((a, b) => a.date.localeCompare(b.date));
+}
+
 /**
  * One-click key connect: pull an FMP key out of the URL hash
  * (…/#/anything?fmpkey=XXXX). Lets the key be delivered as a link the trader

@@ -338,6 +338,30 @@ futures, with session (pre-market / after-close), which contracts they hit, and 
 Every block loads independently and degrades honestly when a feed is down; nothing is a black box —
 each line of the verdict names the input that produced it.
 
+### Conviction Board — executable trade ideas from the five edge domains
+The Terminal tells you where you are; the Conviction Board tells you **what to trade**. A
+rules-based engine scans all five Axia edge domains and emits complete trade plans — thesis,
+trigger, entry zone, invalidation, targets and a kill switch — with the cross-domain evidence for
+and against each one. **Central banks:** the pre-FOMC drift (long ES into the statement, flat
+before 19:00 Lisbon) and the statement-day second move (trade the direction that survives the press
+conference, with ZN as the honest-leg check). **Economic data:** print-squeeze setups — a tier-1
+release inside 48 hours whose playbook touches a market where large specs sit at a 3-year COT
+extreme; the surprise that hits the crowd travels farther, so the idea trades with the squeeze and
+stands down on an on-consensus print. **News & narrative:** GDELT media-volume surges (≥2σ vs the
+theme's own baseline) turned into headline-reaction plans on the mapped instruments, cross-checked
+against the vol curve and correlation breaks. **Technicals:** an empirical gap study on the index's
+own history (today's gap in ATR14 multiples vs the same-day fill rate of comparable gaps — fade
+when history filled ≥60%, go with it when it didn't) and the expected-move rails read through the
+dealer-gamma regime (fade the rails in positive gamma, follow the break in negative, with the put
+wall / call wall / zero-gamma flip as the printed levels). **Flow:** the OPEX pin (long-gamma
+expiries pull price to the heavy strikes; exit at settlement), month-end rebalancing (when
+equities and bonds diverge ≥2pp on the month, fixed-weight mandates must sell the winner into the
+final closes) and earnings-cluster risk. Conviction (1–5) is scored from cross-domain agreement —
+confirms add, conflicts subtract — and the board sorts by it. When nothing qualifies it says
+**STAND DOWN** in so many words: no forced trades on quiet days is itself the edge. Every card
+cross-links to the Terminal (regime backdrop), Catalysts (the print study) and the Trade Desk
+(stage the order on the DOM when the trigger fires).
+
 ### Charts — TradingView inside the platform
 The Charts section embeds TradingView's free Advanced Chart widget: full price history, live
 updating quotes, and the complete drawing/indicator toolset, rendered in Lisbon time like the rest
