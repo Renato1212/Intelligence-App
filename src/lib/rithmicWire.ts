@@ -151,6 +151,8 @@ export const TEMPLATES: Record<number, { name: string; schema: Schema }> = {
   150: { name: 'LastTrade', schema: {
     templateId: F.templateId, symbol: F.symbol, exchange: F.exchange,
     tradePrice: { no: 100006, type: 'double' }, tradeSize: { no: 100178, type: 'int' },
+    // aggressor side (TransactionType BUY=1/SELL=2) — drives cumulative delta
+    aggressor: { no: 112003, type: 'int' },
     netChange: { no: 100011, type: 'double' }, percentChange: { no: 100056, type: 'double' },
     volume: { no: 100032, type: 'int' },
   } },
