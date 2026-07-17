@@ -360,6 +360,21 @@ notifications — exactly as Rithmic's own sample does, one protobuf message per
 of Rithmic's licensed files are bundled; only the open wire format and the protocol's field
 numbers are used, and the dev kit is git-ignored.
 
+**Depth of Market (DOM)** — a professional order-flow ladder built on the live Rithmic stream
+(`dom.ts`, fully unit-tested). It maintains a price-keyed ladder and derives the reads a serious
+futures desk wants: a **volume profile** per price (buy vs sell split) with **POC** and **value
+area**, **cumulative delta** (buy-aggressor minus sell-aggressor volume, session and per-price),
+**depth ratios** (inside bid/ask imbalance and whole-book imbalance), resting bid/ask size per
+level, session **VWAP / high / low**, and a rolling tape. The ladder highlights the inside quote
+and last, marks POC (◆) and VWAP (▸), shades the value area, and supports **click-trading** — click
+a bid cell to stage a BUY at that price, an ask cell to stage a SELL. Tick sizes are per-instrument.
+
+**Auto screen-recording on entry** (`screenRecord.ts`) — turn it on once (a single Screen-Capture
+permission covers the whole session) and the platform starts a screen video the instant you send an
+order, saving it as a timestamped WebM clip (`edge-<symbol>-<side>-<datetime>.webm`) when you stop
+it. Built for trade review: re-watch exactly what the tape did around each position. Nothing records
+until you explicitly enable it.
+
 The **Trade Desk** page (`/desk`, under Execution) is the trading surface: connect with the
 credentials saved in Settings, stream a contract's live last / bid / ask, see your accounts and
 trade routes, and place Market / Limit / Stop / Stop-limit orders with Day/GTC/IOC/FOK duration.

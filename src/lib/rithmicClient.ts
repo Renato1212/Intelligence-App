@@ -93,8 +93,20 @@ type Ev =
   | { type: 'account'; account: Account }
   | { type: 'route'; route: TradeRoute }
   | { type: 'quote'; quote: Quote }
+  | { type: 'trade'; trade: Trade }
   | { type: 'order'; update: OrderUpdate }
   | { type: 'log'; message: string };
+
+/** One executed print off the tape — feeds the DOM's volume profile & delta. */
+export interface Trade {
+  symbol: string;
+  exchange: string;
+  price: number;
+  size: number;
+  /** 1 = buy aggressor (lifted the offer), 2 = sell aggressor (hit the bid), null = unknown */
+  aggressor: number | null;
+  at: number;
+}
 
 type Listener = (e: Ev) => void;
 
@@ -321,6 +333,16 @@ export class RProtocolClient {
       }
       case 150: { // LastTrade
         this.mergeQuote(msg, { last: msg.tradePrice, netChange: msg.netChange, volume: msg.volume });
+        if (msg.tradePrice != null && msg.tradeSize != null) {
+          this.emit({ type: 'trade', trade: {
+            symbol: String(msg.symbol ?? ''),
+            exchange: String(msg.exchange ?? ''),
+            price: Number(msg.tradePrice),
+            size: Number(msg.tradeSize),
+            aggressor: msg.aggressor != null ? Number(msg.aggressor) : null,
+            at: Date.now(),
+          } });
+        }
         break;
       }
       case 151: { // BestBidOffer
