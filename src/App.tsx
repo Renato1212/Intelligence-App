@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Route, Routes } from 'react-router-dom';
 import { AuthGate } from './components/AuthGate';
-import { ToastProvider } from './components/ui';
+import { ToastProvider, useToast } from './components/ui';
 import { currentUser, isLocalOnly, onSyncState, supabase, type SyncState } from './lib/cloud';
-import { extractKeyFromHash, setMarketApiKey } from './lib/market';
+import { connectKeyFromHash } from './lib/market';
 import Dashboard from './pages/Dashboard';
 import Trades from './pages/Trades';
 import TradeDetail from './pages/TradeDetail';
@@ -109,15 +109,27 @@ export default function App() {
 }
 
 function Shell() {
-  // One-click key connect: opening …/#/settings?fmpkey=XXX stores the key and
-  // scrubs it from the URL/history so it never lingers in the address bar.
+  const toast = useToast();
+
+  /*
+   * One-click key connect: opening …/#/settings?fmpkey=XXX stores the key and
+   * scrubs it from the URL/history so it never lingers in the address bar.
+   *
+   * This has to handle BOTH entry paths. A cold load runs it on mount, but
+   * pasting the link into a tab that already has the app open only changes the
+   * hash — React never remounts, so without the hashchange listener the link
+   * would silently do nothing, which looks identical to a bad key.
+   */
   useEffect(() => {
-    const key = extractKeyFromHash(window.location.hash);
-    if (key) {
-      setMarketApiKey(key);
-      window.history.replaceState(null, '', `${window.location.pathname}#/settings`);
-    }
-  }, []);
+    const connect = () => {
+      if (connectKeyFromHash()) {
+        toast('Market-data key connected on this device. Live prices, profiles and studies load from now on.');
+      }
+    };
+    connect();
+    window.addEventListener('hashchange', connect);
+    return () => window.removeEventListener('hashchange', connect);
+  }, [toast]);
 
   return (
     <>

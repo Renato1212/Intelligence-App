@@ -184,6 +184,27 @@ export function extractKeyFromHash(hash: string): string | null {
   return m ? m[1] : null;
 }
 
+/** Fired whenever the market-data key changes, so open screens can re-read it. */
+export const MARKET_KEY_EVENT = 'ei-market-key-changed';
+
+/**
+ * Consume a ?fmpkey= deep link: store the key, scrub it out of the URL so it
+ * never lingers in the address bar or history, and announce the change.
+ *
+ * Called at bootstrap (before React renders, so screens mount with the key
+ * already in place) and again on hashchange (so pasting the link into a tab
+ * that already has the app open works too). Returns true when a key was taken.
+ */
+export function connectKeyFromHash(): boolean {
+  if (typeof window === 'undefined') return false;
+  const key = extractKeyFromHash(window.location.hash);
+  if (!key) return false;
+  setMarketApiKey(key);
+  window.history.replaceState(null, '', `${window.location.pathname}#/settings`);
+  window.dispatchEvent(new CustomEvent(MARKET_KEY_EVENT, { detail: key }));
+  return true;
+}
+
 /** The risk-sense dashboard as free-tier-accessible ETF proxies. */
 const QUOTE_SYMBOLS: { symbol: string; label: string }[] = [
   { symbol: 'SPY', label: 'S&P 500' },
