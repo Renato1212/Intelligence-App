@@ -144,6 +144,37 @@ export function parseFmpOhlc(json: unknown): OhlcBar[] {
 }
 
 /**
+ * Intraday bar candidates for one symbol. 30-minute bars are the Market
+ * Profile standard (one TPO bracket per bar), so that is the default interval.
+ */
+export function fmpIntradayUrls(symbol: string, interval = '30min', opts: { from?: string; to?: string } = {}): string[] {
+  const to = opts.to ?? new Date().toISOString().slice(0, 10);
+  const from = opts.from ?? new Date(Date.now() - 12 * 86400000).toISOString().slice(0, 10);
+  const stable = `stable/historical-chart/${interval}?symbol=${symbol}&from=${from}&to=${to}`;
+  const legacy = `api/v3/historical-chart/${interval}/${symbol}?from=${from}&to=${to}`;
+  return [...fmpUrls(stable), ...fmpUrls(legacy)];
+}
+
+/** Pure: parse intraday bars (both FMP shapes emit a bare array here). */
+export function parseFmpIntraday(json: unknown): { time: string; open: number; high: number; low: number; close: number; volume: number | null }[] {
+  const rows = Array.isArray(json) ? json : (json as { historical?: unknown[] })?.historical;
+  if (!Array.isArray(rows)) return [];
+  const out: { time: string; open: number; high: number; low: number; close: number; volume: number | null }[] = [];
+  for (const r of rows as Record<string, unknown>[]) {
+    const time = String(r.date ?? '').slice(0, 19);
+    if (!/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(time)) continue;
+    const open = Number(r.open);
+    const high = Number(r.high);
+    const low = Number(r.low);
+    const close = Number(r.close);
+    if (![open, high, low, close].every((v) => isFinite(v) && v > 0)) continue;
+    const vol = Number(r.volume);
+    out.push({ time: time.replace('T', ' '), open, high, low, close, volume: isFinite(vol) && vol > 0 ? vol : null });
+  }
+  return out.sort((a, b) => a.time.localeCompare(b.time));
+}
+
+/**
  * One-click key connect: pull an FMP key out of the URL hash
  * (…/#/anything?fmpkey=XXXX). Lets the key be delivered as a link the trader
  * just opens on each device — no copy-pasting into a form. Pure, testable.

@@ -203,6 +203,12 @@ export const CONNECTS: Record<string, Connection[]> = {
     { route: '/day', label: 'Preparation', why: 'your IF-THEN plan and risk limit live here — execute the plan, do not improvise at the ticket' },
     { route: '/risk', label: 'Risk Guardrail', why: 'know today\'s loss limit and safe size before you arm live trading' },
   ],
+  profile: [
+    { route: '/ideas', label: 'Conviction Board', why: 'the auction read becomes concrete setups — poor extremes, balance fades, trapped-side continuation' },
+    { route: '/desk', label: 'Trade Desk', why: 'these levels are where the DOM matters: watch the tape defend value and the extremes on the ladder' },
+    { route: '/day', label: 'Preparation', why: 'send the read straight into your prep so the plan is written before the open' },
+    { route: '/charts', label: 'Charts', why: 'draw POC, value and the IB on the chart and watch how price treats them live' },
+  ],
   ideas: [
     { route: '/terminal', label: 'Edge Terminal', why: 'the regime read is the backdrop every idea trades inside — check they agree before sizing' },
     { route: '/catalysts', label: 'Catalysts', why: 'data-domain ideas fire around scheduled prints — the deep print study and playbook live here' },

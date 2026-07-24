@@ -4,6 +4,9 @@ import { Connects } from '../components/Connects';
 import { DomLadder } from '../components/DomLadder';
 import { Principle, useToast } from '../components/ui';
 import { browserRecorder, downloadBlob, type RecState, type TradeRecorder } from '../lib/screenRecord';
+import { symbolRoot } from '../lib/contracts';
+import { fmtMoney } from '../lib/format';
+import { INSTRUMENTS, instrumentFor, sizePosition } from '../lib/instruments';
 import { loadConn, RITHMIC_ENVS } from '../lib/rithmic';
 import {
   notifyLabel,
@@ -65,6 +68,10 @@ export default function TradeDesk() {
   const [trigger, setTrigger] = useState('');
   const [duration, setDuration] = useState<OrderTicket['duration']>('DAY');
   const [confirm, setConfirm] = useState<OrderTicket | null>(null);
+
+  // structure-first sizing: stop distance + risk budget → contracts
+  const [riskStop, setRiskStop] = useState('');
+  const [riskBudget, setRiskBudget] = useState(500);
 
   // client instance for the DOM to attach to (state so the ladder re-mounts on connect)
   const [client, setClient] = useState<RProtocolClient | null>(null);
@@ -168,6 +175,26 @@ export default function TradeDesk() {
     triggerPrice: trigger ? Number(trigger) : undefined,
     duration,
   });
+
+  /*
+   * Sizing from structure. The entry is whatever the ticket says (the limit
+   * price, or the live last when going to market) and the stop is where the
+   * idea is wrong — the engine converts that distance into real contract ticks
+   * and answers how many contracts the risk budget allows.
+   */
+  const sizeSpec = useMemo(() => instrumentFor(symbolRoot(symbol)) ?? INSTRUMENTS[0], [symbol]);
+  const sizing = useMemo(() => {
+    const stopPx = Number(riskStop);
+    const entryPx = Number(price) || quotes[`${symbol.trim().toUpperCase()}.${exchange.trim().toUpperCase()}`]?.last;
+    if (!riskStop.trim() || !isFinite(stopPx) || !entryPx || !isFinite(entryPx)) return null;
+    return sizePosition({ spec: sizeSpec, riskBudget, entry: entryPx, stop: stopPx });
+  }, [riskStop, price, quotes, symbol, exchange, sizeSpec, riskBudget]);
+
+  const applySize = () => {
+    if (!sizing || sizing.contracts < 1) return;
+    setQty(sizing.contracts);
+    toast(`Size set to ${sizing.contracts} × ${sizeSpec.root} — ${fmtMoney(sizing.totalRisk)} at risk on a ${sizing.stopTicks}-tick stop.`);
+  };
 
   const reviewOrder = () => {
     const t = ticket();
@@ -348,6 +375,35 @@ export default function TradeDesk() {
                   <option value="DAY">Day</option><option value="GTC">GTC</option><option value="IOC">IOC</option><option value="FOK">FOK</option>
                 </select>
               </label>
+            </div>
+            {/* structure-first sizing: the stop decides the size, not the other way round */}
+            <div style={{ borderTop: '1px solid var(--hairline)', paddingTop: 8 }}>
+              <div className="row" style={{ gap: 8, alignItems: 'flex-end' }}>
+                <label className="small muted" style={{ flex: 1 }}>Stop (where you&apos;re wrong)
+                  <input value={riskStop} onChange={(e) => setRiskStop(e.target.value)} className="input" style={inpStyle} placeholder="4995.00" />
+                </label>
+                <label className="small muted" style={{ width: 110 }}>Risk $
+                  <input type="number" min={0} step={50} value={riskBudget} onChange={(e) => setRiskBudget(Number(e.target.value) || 0)} className="input" style={inpStyle} />
+                </label>
+                <button className="btn sm" onClick={applySize} disabled={!sizing || sizing.contracts < 1} title="set the ticket quantity from the stop distance">
+                  Size it
+                </button>
+              </div>
+              {sizing && (
+                <div className="small" style={{ marginTop: 6, lineHeight: 1.5 }}>
+                  <span className="muted">
+                    {sizeSpec.root}: {sizing.stopTicks} ticks × {fmtMoney(sizeSpec.tickValue)} = <b style={{ color: 'var(--text)' }}>{fmtMoney(sizing.riskPerContract)}</b> per contract →{' '}
+                  </span>
+                  <b style={{ color: sizing.contracts ? 'var(--profit)' : 'var(--loss)' }}>
+                    {sizing.contracts ? `${sizing.contracts} contract${sizing.contracts > 1 ? 's' : ''}` : 'does not fit'}
+                  </b>
+                  <span className="muted"> · {fmtMoney(sizing.totalRisk)} at risk · each tick {fmtMoney(sizing.tickCost)}</span>
+                  {sizing.warnings.map((w) => (
+                    <div key={w.slice(0, 20)} style={{ color: 'var(--loss)' }}>⚠ {w}</div>
+                  ))}
+                  {sizing.microSuggestion && <div style={{ color: 'var(--gold)' }}>→ {sizing.microSuggestion}</div>}
+                </div>
+              )}
             </div>
             <div className="small muted">Route: <b style={{ color: 'var(--text)' }}>{routeFor ? `${routeFor.tradeRoute} (${routeFor.exchange})` : '— none yet —'}</b></div>
             <div className="row" style={{ gap: 8 }}>
