@@ -6,7 +6,7 @@ import { currentUser } from '../lib/cloud';
 import { clearAllData, db, exportBackup, importBackup } from '../lib/db';
 import { loadDemoData } from '../lib/demo';
 import { POINT_VALUES } from '../lib/contracts';
-import { getMarketApiKey, setMarketApiKey } from '../lib/market';
+import { getMarketApiKey, setMarketApiKey, MARKET_KEY_EVENT } from '../lib/market';
 import {
   checkAllSources,
   clearMarketDataCaches,
@@ -232,6 +232,14 @@ function DataConnections() {
   const [results, setResults] = useState<Record<string, SourceResult>>({});
   const [checking, setChecking] = useState(false);
   const [keyInput, setKeyInput] = useState(getMarketApiKey());
+
+  // a ?fmpkey= link can land on this page — reflect the connected key rather
+  // than showing an empty box that looks like the connect failed
+  useEffect(() => {
+    const sync = () => setKeyInput(getMarketApiKey());
+    window.addEventListener(MARKET_KEY_EVENT, sync);
+    return () => window.removeEventListener(MARKET_KEY_EVENT, sync);
+  }, []);
 
   const run = async () => {
     setChecking(true);
