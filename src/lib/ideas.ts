@@ -476,10 +476,17 @@ export function auctionIdeas(i: IdeaInputs): TradeIdea[] {
   const p = i.profile;
   if (!p || p.dayType === 'incomplete') return out;
   const prior = i.priorProfile ?? null;
-  const f = (v: number): string => fmtLvl(v);
+  /*
+   * Profile levels are in the scale of the symbol the profile was BUILT from —
+   * an ETF proxy, not the futures contract these ideas are expressed in. Every
+   * quoted level therefore carries its symbol, so "6320" is never mistaken for
+   * an ES print when it is really SPY.
+   */
+  const px = p.symbol || 'the index proxy';
+  const f = (v: number): string => `${fmtLvl(v)} ${px}`;
 
   const context = (): { confirms: string[]; conflicts: string[] } => {
-    const confirms: string[] = [];
+    const confirms: string[] = [`Levels are ${px} prices (the RTH profile source) — the structure transfers to the future, the exact ticks do not`];
     const conflicts: string[] = [];
     if (prior) {
       const rel = valueRelation(p, prior);

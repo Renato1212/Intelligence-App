@@ -255,7 +255,15 @@ async function fetchEvents(date: string): Promise<{ events: EconEvent[]; error: 
       continue;
     }
     if (res.ok) {
-      const raw = (await res.json()) as Record<string, unknown>[];
+      // a 200 can still carry HTML (proxy interstitial, gateway error page) —
+      // parse defensively and fall through to the next candidate rather than
+      // throwing "Unexpected token '<'" out of the loader
+      let raw: Record<string, unknown>[];
+      try {
+        raw = (await res.json()) as Record<string, unknown>[];
+      } catch {
+        continue;
+      }
       const events = (Array.isArray(raw) ? raw : [])
         .filter((e) => {
           const country = String(e.country ?? '').toUpperCase();
@@ -346,7 +354,14 @@ async function fetchQuotes(): Promise<{ quotes: QuoteRow[]; error: string | null
   }
   if (!res) return { quotes: [], error: 'Could not reach the market-data service (network/CORS).' };
   if (!res.ok) return { quotes: [], error: res.status === 501 ? 'Quotes need an FMP key — paste one in Settings, or set FMP_API_KEY on the deployment (one-time, works everywhere).' : planError(res.status, 'live quotes') };
-  const raw = (await res.json()) as Record<string, unknown>[];
+  // a 200 carrying non-JSON (proxy page, gateway error body) must read as a
+  // feed problem, not crash the quote board
+  let raw: Record<string, unknown>[];
+  try {
+    raw = (await res.json()) as Record<string, unknown>[];
+  } catch {
+    return { quotes: [], error: 'The market-data service returned a non-JSON response — usually a proxy or gateway page rather than data.' };
+  }
   const bySymbol = new Map((Array.isArray(raw) ? raw : []).map((q) => [String(q.symbol), q]));
   const quotes = QUOTE_SYMBOLS.filter((s) => {
     const q = bySymbol.get(s.symbol);
@@ -464,7 +479,12 @@ export async function fetchUSCalendarRange(fromISO: string, toISO: string): Prom
       continue;
     }
     if (res.ok) {
-      const raw = (await res.json()) as Record<string, unknown>[];
+      let raw: Record<string, unknown>[];
+      try {
+        raw = (await res.json()) as Record<string, unknown>[];
+      } catch {
+        continue; // non-JSON 200 — try the next candidate URL
+      }
       const rows = (Array.isArray(raw) ? raw : [])
         .filter((e) => ['US', 'USA', 'UNITED STATES'].includes(String(e.country ?? '').toUpperCase()))
         .map((e) => ({

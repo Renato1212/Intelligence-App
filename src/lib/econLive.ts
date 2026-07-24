@@ -232,7 +232,14 @@ async function fetchRangeRaw(fromISO: string, toISO: string): Promise<LiveEventR
       if (res.status === 401) return null;
       continue;
     }
-    const raw = (await res.json()) as Record<string, unknown>[];
+    // a 200 with a non-JSON body (proxy page, truncated response) is a failed
+    // candidate, not a crash — move on to the next URL
+    let raw: Record<string, unknown>[];
+    try {
+      raw = (await res.json()) as Record<string, unknown>[];
+    } catch {
+      continue;
+    }
     const rows = (Array.isArray(raw) ? raw : [])
       .filter((e) => ['US', 'USA', 'UNITED STATES'].includes(String(e.country ?? '').toUpperCase()))
       .map((e) => {
