@@ -166,6 +166,63 @@ export const DATA_SOURCES: DataSource[] = [
       return p != null ? `SPY ${p.toFixed(2)}` : null;
     },
   },
+  /*
+   * FMP capability probes. A quote endpoint working does NOT mean the whole
+   * key works: intraday history and the earnings calendar sit on higher plan
+   * tiers, so a key can pass the quote check while the Market Profile page
+   * stays empty. These probe exactly what each feature calls, so the health
+   * board names the feature that is actually down instead of implying the key
+   * is bad.
+   */
+  {
+    id: 'fmp-intraday',
+    label: 'FMP intraday bars (30-minute)',
+    powers: 'Market Profile — TPO/volume distribution, value area, day & open type',
+    host: 'financialmodelingprep.com/stable/historical-chart',
+    needsKey: false,
+    keyless: false,
+    url: (key) =>
+      key
+        ? `https://financialmodelingprep.com/stable/historical-chart/30min?symbol=SPY&apikey=${key}`
+        : '/api/fmp?p=stable%2Fhistorical-chart%2F30min%3Fsymbol%3DSPY',
+    parseSample: (j) => {
+      const rows = Array.isArray(j) ? j : [];
+      if (!rows.length) return null;
+      const last = rows[0] as Record<string, unknown>;
+      return `${rows.length} bars · latest ${String(last?.date ?? '').slice(0, 16)}`;
+    },
+  },
+  {
+    id: 'fmp-eod',
+    label: 'FMP daily OHLC (full)',
+    powers: 'Gap study on the Conviction Board · month-end rebalancing detector',
+    host: 'financialmodelingprep.com/stable/historical-price-eod',
+    needsKey: false,
+    keyless: false,
+    url: (key) =>
+      key
+        ? `https://financialmodelingprep.com/stable/historical-price-eod/full?symbol=SPY&apikey=${key}`
+        : '/api/fmp?p=stable%2Fhistorical-price-eod%2Ffull%3Fsymbol%3DSPY',
+    parseSample: (j) => {
+      const rows = Array.isArray(j) ? j : (j as { historical?: unknown[] })?.historical;
+      if (!Array.isArray(rows) || !rows.length) return null;
+      const r = rows[0] as Record<string, unknown>;
+      return r?.open != null && r?.high != null ? `OHLC thru ${String(r.date ?? '').slice(0, 10)}` : 'no OHLC fields';
+    },
+  },
+  {
+    id: 'fmp-earnings',
+    label: 'FMP earnings calendar',
+    powers: 'Earnings radar (Edge Terminal) · earnings-cluster flow ideas',
+    host: 'financialmodelingprep.com/stable/earnings-calendar',
+    needsKey: false,
+    keyless: false,
+    url: (key) =>
+      key
+        ? `https://financialmodelingprep.com/stable/earnings-calendar?apikey=${key}`
+        : '/api/fmp?p=stable%2Fearnings-calendar',
+    parseSample: (j) => (Array.isArray(j) && j.length ? `${j.length} upcoming reports` : null),
+  },
 ];
 
 /* ----------------------------- classification ---------------------------- */

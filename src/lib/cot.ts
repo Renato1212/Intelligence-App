@@ -368,7 +368,15 @@ async function fetchFromCftc(): Promise<CotSeries[]> {
       throw new Error('Could not reach the CFTC public reporting service (network).');
     }
     if (res.ok) {
-      const raw = (await res.json()) as Record<string, unknown>[];
+      // a 200 carrying HTML instead of JSON must read as a failed source, not
+      // as a parser crash surfacing "Unexpected token '<'" to the trader
+      let raw: Record<string, unknown>[];
+      try {
+        raw = (await res.json()) as Record<string, unknown>[];
+      } catch {
+        lastErr = 'CFTC returned a non-JSON response (service page or maintenance).';
+        continue;
+      }
       return parseRows(Array.isArray(raw) ? raw : []);
     }
     lastErr = `CFTC request failed (${res.status}).`;
