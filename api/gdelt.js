@@ -6,6 +6,8 @@
  * as /api/bls: fetch server-side on the trader's own deployment, relay JSON.
  * Only the two modes the app uses are allowed through.
  */
+import { fetchUpstream } from './_upstream.js';
+
 const MODES = new Set(['timelinevol', 'artlist']);
 
 export default async function handler(req, res) {
@@ -25,13 +27,7 @@ export default async function handler(req, res) {
     `https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(query)}` +
     `&mode=${mode}&timespan=${timespan}&format=json&sort=hybridrel&maxrecords=${maxrecords}`;
   try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 8000);
-    const r = await fetch(upstream, {
-      headers: { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0 (compatible; edge-intelligence/1.0)' },
-      signal: ctrl.signal,
-    });
-    clearTimeout(timer);
+    const r = await fetchUpstream(upstream, { timeoutMs: 7000 });
     if (!r.ok) {
       res.status(502).json({ error: `GDELT responded ${r.status}.` });
       return;
