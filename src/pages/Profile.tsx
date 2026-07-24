@@ -4,7 +4,7 @@ import { Principle, StatTile, useToast } from '../components/ui';
 import { db } from '../lib/db';
 import { todayISO } from '../lib/format';
 import { INSTRUMENTS, formatPrice, instrumentFor } from '../lib/instruments';
-import { fmpIntradayUrls, parseFmpIntraday } from '../lib/market';
+import { intradayBarUrls, parseFmpIntraday } from '../lib/market';
 import {
   auctionRead, buildProfile, defaultFmt, groupSessions, openLocation, profileLevels, valueRelation,
   DAY_TYPE_LABEL, DAY_TYPE_MEANING, OPEN_TYPE_LABEL, OPEN_LOCATION_MEANING, VALUE_RELATION_MEANING,
@@ -47,7 +47,7 @@ export default function Profile() {
     setBars(null);
     setSessionIdx(0);
     void (async () => {
-      for (const url of fmpIntradayUrls(spec.proxy!, '30min')) {
+      for (const url of intradayBarUrls(spec.proxy!, '30min')) {
         let res: Response;
         try {
           res = await fetch(url);

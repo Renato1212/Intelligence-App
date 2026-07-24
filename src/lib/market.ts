@@ -155,6 +155,23 @@ export function fmpIntradayUrls(symbol: string, interval = '30min', opts: { from
   return [...fmpUrls(stable), ...fmpUrls(legacy)];
 }
 
+/**
+ * Every candidate for intraday bars, best first.
+ *
+ * FMP puts intraday history behind a paid tier — a valid key answers HTTP 402
+ * on historical-chart — so the keyless /api/yahoo relay is appended as a real
+ * fallback rather than leaving the Market Profile page empty. Both sources
+ * return the same row shape, so parseFmpIntraday reads either.
+ */
+export function intradayBarUrls(symbol: string, interval = '30min', opts: { from?: string; to?: string; range?: string } = {}): string[] {
+  const yahooInterval = interval.replace('min', 'm').replace('60m', '60m');
+  const range = opts.range ?? '1mo';
+  return [
+    ...fmpIntradayUrls(symbol, interval, opts),
+    `/api/yahoo?symbol=${encodeURIComponent(symbol)}&interval=${yahooInterval}&range=${range}`,
+  ];
+}
+
 /** Pure: parse intraday bars (both FMP shapes emit a bare array here). */
 export function parseFmpIntraday(json: unknown): { time: string; open: number; high: number; low: number; close: number; volume: number | null }[] {
   const rows = Array.isArray(json) ? json : (json as { historical?: unknown[] })?.historical;

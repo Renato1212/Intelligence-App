@@ -11,7 +11,7 @@ import {
   type IdeaInputs,
   type TradeIdea,
 } from '../lib/ideas';
-import { fmpIntradayUrls, fmpOhlcBarUrls, parseFmpIntraday, parseFmpOhlc, type OhlcBar } from '../lib/market';
+import { fmpOhlcBarUrls, intradayBarUrls, parseFmpIntraday, parseFmpOhlc, type OhlcBar } from '../lib/market';
 import { buildProfile, groupSessions, type SessionProfile } from '../lib/marketProfile';
 import { loadNarrative, type ThemeSeries } from '../lib/narrative';
 import { expectedMove, gammaProfile, loadCboeQuote, loadChain, vixRegime, type ExpectedMove, type GammaProfile, type VixRegime } from '../lib/options';
@@ -111,7 +111,7 @@ export default function Ideas() {
     })();
     // the auction: last two completed RTH sessions of the index proxy
     void (async () => {
-      for (const url of fmpIntradayUrls('SPY', '30min')) {
+      for (const url of intradayBarUrls('SPY', '30min')) {
         let res: Response;
         try {
           res = await fetch(url);
