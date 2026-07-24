@@ -130,8 +130,9 @@ export default function Ideas() {
         const days = [...groupSessions(parsed).entries()].sort((a, b) => b[0].localeCompare(a[0]));
         if (alive && days.length) {
           setProfiles({
-            latest: days[0] ? buildProfile(days[0][1], { date: days[0][0] }) : null,
-            prior: days[1] ? buildProfile(days[1][1], { date: days[1][0] }) : null,
+            // name the source symbol so every quoted level says whose price it is
+            latest: days[0] ? buildProfile(days[0][1], { date: days[0][0], symbol: 'SPY' }) : null,
+            prior: days[1] ? buildProfile(days[1][1], { date: days[1][0], symbol: 'SPY' }) : null,
           });
           tick();
         }

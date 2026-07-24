@@ -3,10 +3,10 @@ import { Connects } from '../components/Connects';
 import { Principle, StatTile, useToast } from '../components/ui';
 import { db } from '../lib/db';
 import { todayISO } from '../lib/format';
-import { INSTRUMENTS, formatPrice, instrumentFor, type InstrumentSpec } from '../lib/instruments';
+import { INSTRUMENTS, formatPrice, instrumentFor } from '../lib/instruments';
 import { fmpIntradayUrls, parseFmpIntraday } from '../lib/market';
 import {
-  auctionRead, buildProfile, groupSessions, openLocation, profileLevels, valueRelation,
+  auctionRead, buildProfile, defaultFmt, groupSessions, openLocation, profileLevels, valueRelation,
   DAY_TYPE_LABEL, DAY_TYPE_MEANING, OPEN_TYPE_LABEL, OPEN_LOCATION_MEANING, VALUE_RELATION_MEANING,
   type IntradayBar, type SessionProfile,
 } from '../lib/marketProfile';
@@ -35,6 +35,7 @@ export default function Profile() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [sessionIdx, setSessionIdx] = useState(0); // 0 = most recent
+  const [scaleRef, setScaleRef] = useState(''); // your contract's current price
   const toast = useToast();
 
   const spec = instrumentFor(root) ?? PROFILE_INSTRUMENTS[0];
@@ -84,12 +85,37 @@ export default function Profile() {
   const sessions = useMemo(() => {
     if (!bars) return [];
     const grouped = [...groupSessions(bars).entries()].sort((a, b) => b[0].localeCompare(a[0]));
-    return grouped.map(([date, list]) => ({ date, profile: buildProfile(list, { date }) })).filter((s) => s.profile);
-  }, [bars]);
+    return grouped
+      .map(([date, list]) => ({ date, profile: buildProfile(list, { date, symbol: spec.proxy ?? '' }) }))
+      .filter((s) => s.profile);
+  }, [bars, spec.proxy]);
 
   const current = sessions[sessionIdx]?.profile ?? null;
   const prior = sessions[sessionIdx + 1]?.profile ?? null;
-  const read = useMemo(() => (current ? auctionRead(current, prior) : null), [current, prior]);
+
+  /*
+   * Price scale. The profile is built from a liquid ETF proxy, so its prices
+   * are the PROXY's — rendering them with the futures contract's convention
+   * would invent quotes that do not exist (an IEF price of 95.53 formatted as
+   * ZN reads "95'169"). So proxy prices get proxy formatting by default.
+   *
+   * Enter your contract's current price and every level is rescaled
+   * proportionally into that contract's scale — then, and only then, the
+   * contract's own tick formatting is the correct one to use. Profile
+   * structure is relative, so proportional scaling preserves it.
+   */
+  const scale = useMemo(() => {
+    const ref = Number(scaleRef);
+    if (!scaleRef.trim() || !isFinite(ref) || ref <= 0 || !current?.close) return 1;
+    return ref / current.close;
+  }, [scaleRef, current]);
+  const scaled = scale !== 1;
+  const fmtPx = useMemo(
+    () => (v: number) => (scaled ? formatPrice(spec, v * scale) : defaultFmt(v)),
+    [scaled, scale, spec],
+  );
+
+  const read = useMemo(() => (current ? auctionRead(current, prior, fmtPx) : null), [current, prior, fmtPx]);
   const levels = useMemo(() => (current ? profileLevels(current, prior) : []), [current, prior]);
 
   async function copyToPrep() {
@@ -102,7 +128,7 @@ export default function Profile() {
       'Plan:',
       ...read.plan.map((l) => `• ${l}`),
       '',
-      `Levels: ${levels.slice(0, 8).map((l) => `${l.label} ${formatPrice(spec, l.price)}`).join(' · ')}`,
+      `Levels: ${levels.slice(0, 8).map((l) => `${l.label} ${fmtPx(l.price)}`).join(' · ')}`,
     ].join('\n');
     const existing = await db.preps.where('date').equals(date).first();
     if (existing?.id != null) {
@@ -147,6 +173,30 @@ export default function Profile() {
             ))}
           </div>
         )}
+        {/* price scale — proxy prices by default, rescaled to the contract on request */}
+        <div className="row" style={{ gap: 10, flexWrap: 'wrap', alignItems: 'center', marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--hairline)' }}>
+          <span
+            className="small"
+            style={{ padding: '3px 9px', borderRadius: 999, fontWeight: 700, border: `1px solid ${scaled ? 'var(--gold)' : 'var(--hairline)'}`, color: scaled ? 'var(--gold)' : 'var(--muted)' }}
+          >
+            {scaled ? `Levels in ${spec.root}` : `Levels in ${spec.proxy}`}
+          </span>
+          <label className="small muted" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            {spec.root} price now
+            <input
+              value={scaleRef}
+              onChange={(e) => setScaleRef(e.target.value)}
+              placeholder="—"
+              style={{ width: 100 }}
+              title={`Enter the current ${spec.root} price to rescale every level from ${spec.proxy} into ${spec.root}`}
+            />
+          </label>
+          <span className="hint" style={{ flex: 1, minWidth: 260 }}>
+            {scaled
+              ? `Rescaled from ${spec.proxy} by ×${scale.toFixed(4)} and formatted in ${spec.root} ticks. Structure is exact; prices are proportional, so confirm the final tick on your own chart.`
+              : `The profile is built from ${spec.proxy}, so these are ${spec.proxy} prices. The STRUCTURE (day type, value, extension) transfers to ${spec.root} unchanged — type your ${spec.root} price above to rescale the levels.`}
+          </span>
+        </div>
       </div>
 
       {loading && <div className="card muted small">Building the profile from 30-minute bars…</div>}
@@ -172,13 +222,13 @@ export default function Profile() {
           {/* structure tiles */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(165px, 1fr))', gap: 10 }}>
             <StatTile small label="Day type" value={DAY_TYPE_LABEL[current.dayType]} delta={`${current.rangeVsIb.toFixed(2)}× initial balance`} />
-            <StatTile small label="Open type" value={OPEN_TYPE_LABEL[current.openType]} delta={`open ${formatPrice(spec, current.open)}`} />
-            <StatTile small label="Value area" value={`${formatPrice(spec, current.val)} – ${formatPrice(spec, current.vah)}`} delta={`POC ${formatPrice(spec, current.poc)}`} />
-            <StatTile small label="Initial balance" value={`${formatPrice(spec, current.ibLow)} – ${formatPrice(spec, current.ibHigh)}`} delta={`${formatPrice(spec, current.ibRange)} wide`} />
+            <StatTile small label="Open type" value={OPEN_TYPE_LABEL[current.openType]} delta={`open ${fmtPx(current.open)}`} />
+            <StatTile small label="Value area" value={`${fmtPx(current.val)} – ${fmtPx(current.vah)}`} delta={`POC ${fmtPx(current.poc)}`} />
+            <StatTile small label="Initial balance" value={`${fmtPx(current.ibLow)} – ${fmtPx(current.ibHigh)}`} delta={`${fmtPx(current.ibRange)} wide`} />
             <StatTile
               small
               label="Range extension"
-              value={current.extUp === 0 && current.extDown === 0 ? 'none' : `${current.extUp > 0 ? `+${formatPrice(spec, current.extUp)}` : ''}${current.extUp > 0 && current.extDown > 0 ? ' / ' : ''}${current.extDown > 0 ? `−${formatPrice(spec, current.extDown)}` : ''}`}
+              value={current.extUp === 0 && current.extDown === 0 ? 'none' : `${current.extUp > 0 ? `+${fmtPx(current.extUp)}` : ''}${current.extUp > 0 && current.extDown > 0 ? ' / ' : ''}${current.extDown > 0 ? `−${fmtPx(current.extDown)}` : ''}`}
               delta={current.extUp > 0 && current.extDown > 0 ? 'both sides — two-sided auction' : current.extUp > 0 ? 'initiative buying' : current.extDown > 0 ? 'initiative selling' : 'contained by the first hour'}
             />
             <StatTile small label="Close position" value={`${Math.round(current.closePosition * 100)}%`} delta="of the day range" valueClass={current.closePosition >= 0.8 ? 'pos' : current.closePosition <= 0.2 ? 'neg' : undefined} />
@@ -210,7 +260,7 @@ export default function Profile() {
               The distribution
               <span className="hint">TPO letters — one per 30-minute bracket · value area shaded · POC ◆ · IB bracket marked · volume bar per row</span>
             </div>
-            <ProfileGrid p={current} spec={spec} />
+            <ProfileGrid p={current} fmtPx={fmtPx} rthOpen={spec.rthOpen} />
           </div>
 
           {/* the plan */}
@@ -242,7 +292,7 @@ export default function Profile() {
                   {levels.map((l) => (
                     <tr key={`${l.label}-${l.price}`}>
                       <td style={{ color: l.kind === 'value' ? POC_COLOR : l.kind === 'gap' ? 'var(--dom-tech)' : undefined, fontWeight: l.kind === 'value' ? 700 : 400 }}>{l.label}</td>
-                      <td className="mono" style={{ textAlign: 'right', fontWeight: 700 }}>{formatPrice(spec, l.price)}</td>
+                      <td className="mono" style={{ textAlign: 'right', fontWeight: 700 }}>{fmtPx(l.price)}</td>
                       <td className="muted small">{l.why}</td>
                     </tr>
                   ))}
@@ -282,7 +332,7 @@ export default function Profile() {
 }
 
 /** The TPO letter grid: price axis, letters, value-area shading, volume bars. */
-function ProfileGrid({ p, spec }: { p: SessionProfile; spec: InstrumentSpec }) {
+function ProfileGrid({ p, fmtPx, rthOpen }: { p: SessionProfile; fmtPx: (v: number) => string; rthOpen: string }) {
   const maxTpo = Math.max(...p.rows.map((r) => r.tpoCount), 1);
   const maxVol = Math.max(...p.rows.map((r) => r.volume), 1);
   const descending = [...p.rows].sort((a, b) => b.price - a.price);
@@ -303,7 +353,7 @@ function ProfileGrid({ p, spec }: { p: SessionProfile; spec: InstrumentSpec }) {
               <span style={{ width: 4, alignSelf: 'stretch', background: inIb ? 'var(--dom-tech)' : 'transparent', opacity: 0.55, flexShrink: 0 }} title={inIb ? 'inside the initial balance' : undefined} />
               {/* price */}
               <span style={{ width: 74, textAlign: 'right', paddingRight: 6, color: isPoc ? POC_COLOR : 'var(--muted)', fontWeight: isPoc ? 700 : 400, flexShrink: 0 }}>
-                {formatPrice(spec, r.price)}
+                {fmtPx(r.price)}
               </span>
               {/* poc / vpoc markers */}
               <span style={{ width: 16, color: POC_COLOR, flexShrink: 0 }}>{isPoc ? '◆' : isVpoc ? '◇' : ''}</span>
@@ -333,7 +383,7 @@ function ProfileGrid({ p, spec }: { p: SessionProfile; spec: InstrumentSpec }) {
         })}
       </div>
       <div className="hint" style={{ marginTop: 8 }}>
-        Rows are {formatPrice(spec, p.bucket)} wide. Letters are 30-minute brackets in order (A = {spec.rthOpen} ET).
+        Rows are {defaultFmt(p.bucket)} wide (in {p.symbol || "feed"} points). Letters are 30-minute brackets in order (A = {rthOpen} ET).
         <span style={{ color: 'var(--loss)' }}> Red letters</span> are single prints — price passed through without
         auctioning, so they act as magnets on the way back. The <span style={{ color: 'var(--dom-tech)' }}>left rail</span> marks
         the initial balance; the shaded band is the value area; ◆ is the time POC and ◇ the volume POC.

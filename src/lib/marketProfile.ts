@@ -112,6 +112,8 @@ export interface Extremes {
 
 export interface SessionProfile {
   date: string;
+  /** the symbol the profile was actually built from (often an ETF proxy) */
+  symbol: string;
   bucket: number;
   rows: TpoRow[];
   /** number of 30-minute brackets that printed */
@@ -221,7 +223,7 @@ export function classifyOpenType(bars: IntradayBar[], ibRange: number): OpenType
 }
 
 /** Build the complete auction picture for one session. */
-export function buildProfile(bars: IntradayBar[], opts: { bucket?: number; date?: string } = {}): SessionProfile | null {
+export function buildProfile(bars: IntradayBar[], opts: { bucket?: number; date?: string; symbol?: string } = {}): SessionProfile | null {
   const clean = bars.filter((b) => isFinite(b.high) && isFinite(b.low) && b.high >= b.low);
   if (clean.length < 2) return null;
   const date = opts.date ?? clean[0].time.slice(0, 10);
@@ -315,6 +317,7 @@ export function buildProfile(bars: IntradayBar[], opts: { bucket?: number; date?
 
   return {
     date,
+    symbol: opts.symbol ?? '',
     bucket,
     rows,
     periods: periodKeys.length,
@@ -479,6 +482,12 @@ export const OPEN_LOCATION_MEANING: Record<OpenLocation, string> = {
   'below-range': 'Gapped below yesterday\'s entire range. Same binary: acceptance makes the gap edge resistance, rejection means a fill. Let the open\'s first hour tell you which before committing.',
 };
 
+/** Price rendering that suits whatever scale the data is in. */
+export function defaultFmt(v: number): string {
+  const a = Math.abs(v);
+  return a >= 1000 ? v.toFixed(0) : a >= 1 ? v.toFixed(2) : v.toFixed(4);
+}
+
 export interface ProfileLevel {
   label: string;
   price: number;
@@ -537,11 +546,17 @@ export interface AuctionRead {
   plan: string[];
 }
 
-/** The full teaching read of one session, in the trader's own vocabulary. */
-export function auctionRead(p: SessionProfile, prior?: SessionProfile | null): AuctionRead {
+/**
+ * The full teaching read of one session, in the trader's own vocabulary.
+ *
+ * `fmt` renders every price in the read. Pass the formatter that matches the
+ * scale the profile was BUILT in — a profile built from an ETF proxy must not
+ * be printed in the futures contract's convention (an IEF price of 95.53 would
+ * render as the bond quote "95'169", which is a number that does not exist).
+ */
+export function auctionRead(p: SessionProfile, prior?: SessionProfile | null, fmt: (v: number) => string = defaultFmt): AuctionRead {
   const lines: string[] = [];
   const plan: string[] = [];
-  const fmt = (v: number) => (Math.abs(v) >= 1000 ? v.toFixed(0) : v.toFixed(2));
 
   lines.push(`${OPEN_TYPE_LABEL[p.openType]} — ${OPEN_TYPE_MEANING[p.openType]}`);
   lines.push(`${DAY_TYPE_LABEL[p.dayType]} — ${DAY_TYPE_MEANING[p.dayType]}`);
