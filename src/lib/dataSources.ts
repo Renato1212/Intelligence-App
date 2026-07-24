@@ -223,6 +223,21 @@ export const DATA_SOURCES: DataSource[] = [
         : '/api/fmp?p=stable%2Fearnings-calendar',
     parseSample: (j) => (Array.isArray(j) && j.length ? `${j.length} upcoming reports` : null),
   },
+  {
+    id: 'yahoo',
+    label: 'Keyless intraday bars — via your deployment',
+    powers: 'Market Profile fallback when FMP intraday is not on your plan (HTTP 402)',
+    host: '/api/yahoo (serverless proxy)',
+    needsKey: false,
+    keyless: true,
+    url: () => '/api/yahoo?symbol=SPY&interval=30m&range=5d',
+    parseSample: (j) => {
+      const rows = Array.isArray(j) ? j : [];
+      if (!rows.length) return null;
+      const last = rows[rows.length - 1] as Record<string, unknown>;
+      return `${rows.length} bars · latest ${String(last?.date ?? '').slice(0, 16)}`;
+    },
+  },
 ];
 
 /* ----------------------------- classification ---------------------------- */
@@ -289,7 +304,22 @@ export async function checkSource(src: DataSource, key = getMarketApiKey(), time
         sample = null;
       }
     }
-    return { status, httpStatus: res.status, latencyMs, detail, sample };
+    /*
+     * On a failure, our own relays put the REAL reason in the body
+     * ({"error": "Upstream fetch failed: …"} / "FRED responded HTTP 403").
+     * Without surfacing it every relay failure reads as an anonymous "502 —
+     * endpoint responded with an error", which is undiagnosable. Read it.
+     */
+    let upstream: string | null = null;
+    if (status !== 'live') {
+      try {
+        const body = (await res.json()) as { error?: unknown };
+        if (typeof body?.error === 'string' && body.error.trim()) upstream = body.error.trim().slice(0, 220);
+      } catch {
+        upstream = null; // non-JSON error body — nothing useful to add
+      }
+    }
+    return { status, httpStatus: res.status, latencyMs, detail: upstream ? `${detail} · ${upstream}` : detail, sample };
   } catch {
     const latencyMs = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0);
     const { status, detail } = classifyResult({ threw: true }, src.url(key).startsWith('/'));

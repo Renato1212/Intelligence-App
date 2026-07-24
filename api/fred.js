@@ -10,6 +10,7 @@
  * setup. Edge-cached 24h — these are monthly series.
  */
 import { cleanFredParam, parseFredCsv } from './_fred.js';
+import { fetchUpstream } from './_upstream.js';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -26,13 +27,11 @@ export default async function handler(req, res) {
     // 1959→now history, which is what made the function slow enough to look
     // "unreachable" on the health board. 8s abort keeps the worst case honest.
     const cosd = new Date(Date.now() - 10 * 365.25 * 86400000).toISOString().slice(0, 10);
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 8000);
-    const r = await fetch(`https://fred.stlouisfed.org/graph/fredgraph.csv?id=${ids.join(',')}&cosd=${cosd}`, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; edge-intelligence/1.0)', Accept: 'text/csv' },
-      signal: ctrl.signal,
+    // fredgraph 403s a bot-style agent from datacenter IPs — browser identity + retry
+    const r = await fetchUpstream(`https://fred.stlouisfed.org/graph/fredgraph.csv?id=${ids.join(',')}&cosd=${cosd}`, {
+      accept: 'text/csv',
+      timeoutMs: 7000,
     });
-    clearTimeout(timer);
     if (!r.ok) {
       res.status(502).json({ error: `FRED responded HTTP ${r.status}`, series: {} });
       return;

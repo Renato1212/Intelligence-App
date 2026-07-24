@@ -6,6 +6,8 @@
  * The path is whitelisted to the DataMapper shape: indicator codes and
  * country/region lists separated by slashes, with optional ?periods=.
  */
+import { fetchUpstream } from './_upstream.js';
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Cache-Control', 's-maxage=21600, stale-while-revalidate=86400, stale-if-error=604800');
@@ -19,13 +21,7 @@ export default async function handler(req, res) {
   const qs = /^[0-9,]{0,60}$/.test(periods) && periods ? `?periods=${periods}` : '';
 
   try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 8000);
-    const r = await fetch(`https://www.imf.org/external/datamapper/api/v1/${path}${qs}`, {
-      headers: { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0 (compatible; edge-intelligence/1.0)' },
-      signal: ctrl.signal,
-    });
-    clearTimeout(timer);
+    const r = await fetchUpstream(`https://www.imf.org/external/datamapper/api/v1/${path}${qs}`, { timeoutMs: 7000 });
     if (!r.ok) {
       res.status(502).json({ error: `IMF responded ${r.status}.` });
       return;
