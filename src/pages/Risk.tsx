@@ -1,12 +1,10 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useMemo, useState } from 'react';
 import { StatTile, useToast } from '../components/ui';
-import { POINT_VALUES } from '../lib/contracts';
 import { db } from '../lib/db';
 import { fmtMoney } from '../lib/format';
-import { computeRisk, getRiskConfig, maxContracts, setRiskConfig, type RiskConfig } from '../lib/risk';
-
-const SIZER_INSTRUMENTS = ['MES', 'ES', 'MNQ', 'NQ', 'MCL', 'CL', 'MGC', 'GC', 'M2K', 'RTY', '6E', 'ZN', 'ZB'];
+import { INSTRUMENTS, frontMonth, instrumentFor, sizePosition } from '../lib/instruments';
+import { computeRisk, getRiskConfig, setRiskConfig, type RiskConfig } from '../lib/risk';
 
 function Gauge({ pct, breached }: { pct: number; breached: boolean }) {
   // semicircle gauge, headroom fraction
@@ -56,9 +54,12 @@ export default function Risk() {
   const trades = useLiveQuery(() => db.trades.toArray(), []) ?? [];
   const [cfg, setCfg] = useState<RiskConfig>(getRiskConfig());
   const toast = useToast();
-  const [stopPts, setStopPts] = useState(10);
-  const [inst, setInst] = useState('MES');
+  const [inst, setInst] = useState('ES');
   const [riskPct, setRiskPct] = useState(10);
+  const [budgetMode, setBudgetMode] = useState<'headroom' | 'daily'>('headroom');
+  const [entry, setEntry] = useState(5000);
+  const [stop, setStop] = useState(4995);
+  const [target, setTarget] = useState('');
 
   const risk = useMemo(() => computeRisk(trades, cfg), [trades, cfg]);
 
@@ -68,8 +69,13 @@ export default function Risk() {
     setRiskConfig(next);
   };
 
-  const perContract = stopPts * (POINT_VALUES[inst] ?? 5);
-  const contracts = maxContracts(risk.headroom, stopPts, POINT_VALUES[inst] ?? 5, riskPct / 100);
+  const sizeSpec = instrumentFor(inst) ?? INSTRUMENTS[0];
+  const budgetBase = budgetMode === 'headroom' ? risk.headroom : cfg.dailyLossLimit;
+  const riskBudget = budgetBase * (riskPct / 100);
+  const sizing = useMemo(
+    () => sizePosition({ spec: sizeSpec, riskBudget, entry, stop, target: target.trim() ? Number(target) : null }),
+    [sizeSpec, riskBudget, entry, stop, target],
+  );
 
   return (
     <>
@@ -127,32 +133,75 @@ export default function Risk() {
         <div className="grid grid-2">
           <div className="card">
             <div className="card-title">
-              Safe position size <span className="hint">headroom-aware</span>
+              Position sizer <span className="hint">structure first — you choose where the trade is wrong, this chooses the size</span>
             </div>
             <p className="muted small" style={{ marginTop: 0 }}>
-              Given your remaining headroom, the most contracts where a single stop-out risks only a set fraction of it.
+              Enter the price where you get in and the price that proves you wrong. The sizer converts that into
+              contract ticks on the real spec, then answers how many contracts fit inside today&apos;s risk budget.
             </p>
             <div className="row" style={{ gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
               <label className="stack" style={{ gap: 4 }}>
-                <span className="small muted">Instrument</span>
+                <span className="small muted">Contract</span>
                 <select value={inst} onChange={(e) => setInst(e.target.value)}>
-                  {SIZER_INSTRUMENTS.map((s) => <option key={s} value={s}>{s}</option>)}
+                  {INSTRUMENTS.map((s) => <option key={s.root} value={s.root}>{s.root} — {s.name}</option>)}
                 </select>
               </label>
               <label className="stack" style={{ gap: 4 }}>
-                <span className="small muted">Stop (points)</span>
-                <input type="number" min={0.25} step={0.25} value={stopPts} onChange={(e) => setStopPts(Number(e.target.value) || 0)} style={{ width: 90 }} />
+                <span className="small muted">Entry</span>
+                <input type="number" step="any" value={entry} onChange={(e) => setEntry(Number(e.target.value) || 0)} style={{ width: 100 }} />
               </label>
               <label className="stack" style={{ gap: 4 }}>
-                <span className="small muted">Risk of headroom</span>
+                <span className="small muted">Stop</span>
+                <input type="number" step="any" value={stop} onChange={(e) => setStop(Number(e.target.value) || 0)} style={{ width: 100 }} />
+              </label>
+              <label className="stack" style={{ gap: 4 }}>
+                <span className="small muted">Target (optional)</span>
+                <input type="number" step="any" value={target} onChange={(e) => setTarget(e.target.value)} style={{ width: 100 }} placeholder="—" />
+              </label>
+              <label className="stack" style={{ gap: 4 }}>
+                <span className="small muted">Risk budget</span>
+                <select value={budgetMode} onChange={(e) => setBudgetMode(e.target.value as 'headroom' | 'daily')}>
+                  <option value="headroom">% of drawdown headroom</option>
+                  <option value="daily">% of daily loss limit</option>
+                </select>
+              </label>
+              <label className="stack" style={{ gap: 4 }}>
+                <span className="small muted">Fraction</span>
                 <select value={riskPct} onChange={(e) => setRiskPct(Number(e.target.value))}>
-                  {[2, 5, 10, 15, 20].map((p) => <option key={p} value={p}>{p}%</option>)}
+                  {[2, 5, 10, 15, 20, 25, 33, 50].map((p) => <option key={p} value={p}>{p}%</option>)}
                 </select>
               </label>
             </div>
+
             <div className="grid grid-tiles" style={{ marginTop: 14 }}>
-              <StatTile label="Max contracts" value={contracts} valueClass="pos" delta={`${fmtMoney(perContract)} risk / contract`} />
-              <StatTile label="Total risk at that size" value={fmtMoney(contracts * perContract)} delta={`${riskPct}% of ${fmtMoney(risk.headroom)} headroom`} />
+              <StatTile
+                label="Position size"
+                value={sizing.contracts ? `${sizing.contracts} × ${sizeSpec.root}` : '0 — does not fit'}
+                valueClass={sizing.contracts ? 'pos' : 'neg'}
+                delta={`${sizing.stopTicks} ticks · ${fmtMoney(sizing.riskPerContract)} per contract`}
+              />
+              <StatTile label="Risk at that size" value={fmtMoney(sizing.totalRisk)} delta={`budget ${fmtMoney(riskBudget)} (${riskPct}% of ${budgetMode === 'headroom' ? 'headroom' : 'daily limit'})`} />
+              <StatTile label="Every tick costs" value={fmtMoney(sizing.tickCost)} delta={`tick ${sizeSpec.tickSize} = ${fmtMoney(sizeSpec.tickValue)}/contract`} />
+              <StatTile
+                label={sizing.rMultiple != null ? 'Reward : risk' : 'Notional carried'}
+                value={sizing.rMultiple != null ? `${sizing.rMultiple.toFixed(2)}R` : fmtMoney(sizing.notional, { compact: true })}
+                valueClass={sizing.rMultiple != null && sizing.rMultiple >= 2 ? 'pos' : sizing.rMultiple != null && sizing.rMultiple < 1 ? 'neg' : undefined}
+                delta={sizing.rMultiple != null ? `notional ${fmtMoney(sizing.notional, { compact: true })}` : 'exposure at this size'}
+              />
+            </div>
+
+            {(sizing.warnings.length > 0 || sizing.microSuggestion) && (
+              <div className="stack" style={{ gap: 5, marginTop: 12 }}>
+                {sizing.warnings.map((w) => (
+                  <div key={w.slice(0, 24)} className="small" style={{ color: 'var(--loss)' }}>⚠ {w}</div>
+                ))}
+                {sizing.microSuggestion && <div className="small" style={{ color: 'var(--gold)' }}>→ {sizing.microSuggestion}</div>}
+              </div>
+            )}
+
+            <div className="hint" style={{ marginTop: 10 }}>
+              {sizeSpec.name} · {sizeSpec.exchange} · tick {sizeSpec.tickSize} = {fmtMoney(sizeSpec.tickValue)} · point = {fmtMoney(sizeSpec.pointValue)} ·
+              RTH {sizeSpec.rthOpen}–{sizeSpec.rthClose} ET · front month {frontMonth(sizeSpec)}. {sizeSpec.notes}
             </div>
           </div>
 

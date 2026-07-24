@@ -338,6 +338,36 @@ futures, with session (pre-market / after-close), which contracts they hit, and 
 Every block loads independently and degrades honestly when a feed is down; nothing is a black box —
 each line of the verdict names the input that produced it.
 
+### Market Profile — the auction, computed
+The technical edge domain is Market Profile, order flow and volume analysis, so the platform computes
+the profile rather than asking you to describe it. From 30-minute bars it builds the **TPO and volume
+distributions** (letters per bracket, value area, time POC and volume POC), the **initial balance** and
+its **range extensions**, and then classifies the session the way the framework teaches: the **day type**
+(trend, double-distribution, normal, normal variation, neutral centre, neutral extreme, non-trend) and the
+**open type** (open-drive, open-test-drive, open-rejection-reverse, open-auction). Against the prior
+session it reads the **value relationship** (higher, lower, overlapping either way, inside, outside,
+unchanged) and **where the open printed** (inside value, outside value, gapped beyond the range). It finds
+the **single prints** left when price ran through an area without auctioning, the **tails** where responsive
+trade genuinely rejected a price, and the **poor highs and lows** that were never finished — carefully
+distinguishing real excess from a session that simply closed at its extreme, which is unfinished business,
+not rejection. The rendered profile shows all of it: letter grid, shaded value area, POC markers, IB rail,
+per-row volume histogram and flagged extremes. Every read is paired with the trading implication in plain
+language, turned into IF-THEN statements for the next session, and listed as **reference levels** with a
+why-line each — and the whole thing writes into your preparation notes with one click.
+
+### Contract specs & position sizing
+Real futures specs for every covered contract — tick size, tick value, point value, exchange, RTH and
+globex hours in ET, roll cycle, micro sibling, data proxy and typical daily range — with prices formatted
+the way the contract actually quotes (the note complex in 32nds, so ZN shows `110'165`). The **position
+sizer** on the Risk Guardrail works structure-first: you give the entry and the price that proves you
+wrong, and it converts that distance into real contract ticks, then answers how many contracts fit inside
+a chosen fraction of your drawdown headroom or daily loss limit. It reports risk per contract, total risk,
+what each tick costs at that size, notional carried and the reward:risk of your target — and it warns
+rather than flatters: stops inside the noise, stops that are most of a day's range, sub-1R targets, and the
+case where one contract already exceeds the budget (where it suggests the micro instead of letting you
+"just take one"). The same engine sits on the **Trade Desk ticket**, so live size comes from the stop
+distance rather than a number typed under pressure.
+
 ### Conviction Board — executable trade ideas from the five edge domains
 The Terminal tells you where you are; the Conviction Board tells you **what to trade**. A
 rules-based engine scans all five Axia edge domains and emits complete trade plans — thesis,
@@ -353,7 +383,11 @@ against the vol curve and correlation breaks. **Technicals:** an empirical gap s
 own history (today's gap in ATR14 multiples vs the same-day fill rate of comparable gaps — fade
 when history filled ≥60%, go with it when it didn't) and the expected-move rails read through the
 dealer-gamma regime (fade the rails in positive gamma, follow the break in negative, with the put
-wall / call wall / zero-gamma flip as the printed levels). **Flow:** the OPEX pin (long-gamma
+wall / call wall / zero-gamma flip as the printed levels), plus the **auction setups** the Market Profile
+engine names: unfinished business at a poor or closed-on extreme, balance-day fades from the value edges
+back to the POC, trapped-side continuation after a neutral-extreme close, single-print bands that travel
+fast once re-entered, and the accept-or-reject decision when the session gaps clear of the prior range —
+each carrying real profile prices rather than adjectives. **Flow:** the OPEX pin (long-gamma
 expiries pull price to the heavy strikes; exit at settlement), month-end rebalancing (when
 equities and bonds diverge ≥2pp on the month, fixed-weight mandates must sell the winner into the
 final closes) and earnings-cluster risk. Conviction (1–5) is scored from cross-domain agreement —

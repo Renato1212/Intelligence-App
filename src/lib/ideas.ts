@@ -18,6 +18,10 @@ import type { GammaProfile, ExpectedMove, VixRegime } from './options';
 import type { ThemeSeries } from './narrative';
 import type { PairCorr } from './crossAsset';
 import type { OhlcBar } from './market';
+import {
+  DAY_TYPE_LABEL, OPEN_TYPE_LABEL, openLocation, valueRelation,
+  type SessionProfile,
+} from './marketProfile';
 
 export type IdeaBias = 'long' | 'short' | 'two-way';
 
@@ -174,6 +178,9 @@ export interface IdeaInputs {
   daysToOpex: number | null;
   /** index-mover earnings inside the next 5 sessions */
   earningsCount: number;
+  /** the last completed session's auction, and the one before it */
+  profile?: SessionProfile | null;
+  priorProfile?: SessionProfile | null;
 }
 
 export function emptyInputs(nowISO: string): IdeaInputs {
@@ -191,6 +198,8 @@ export function emptyInputs(nowISO: string): IdeaInputs {
     tltMtd: null,
     daysToOpex: null,
     earningsCount: 0,
+    profile: null,
+    priorProfile: null,
   };
 }
 
@@ -455,6 +464,182 @@ export function technicalIdeas(i: IdeaInputs): TradeIdea[] {
   return out;
 }
 
+/**
+ * Auction ideas — the Market Profile leg of the technical domain. These are the
+ * setups the profile itself names: a poor extreme that has unfinished business,
+ * a balance whose edges are worth fading, a trapped side after a neutral-extreme
+ * close, and single prints acting as a shelf. Levels come out of the profile, so
+ * every idea carries real prices rather than adjectives.
+ */
+export function auctionIdeas(i: IdeaInputs): TradeIdea[] {
+  const out: TradeIdea[] = [];
+  const p = i.profile;
+  if (!p || p.dayType === 'incomplete') return out;
+  const prior = i.priorProfile ?? null;
+  const f = (v: number): string => fmtLvl(v);
+
+  const context = (): { confirms: string[]; conflicts: string[] } => {
+    const confirms: string[] = [];
+    const conflicts: string[] = [];
+    if (prior) {
+      const rel = valueRelation(p, prior);
+      confirms.push(`Value ${rel.replace(/-/g, ' ')} vs the prior session — ${OPEN_TYPE_LABEL[p.openType].toLowerCase()} open`);
+    }
+    if (i.vol?.state === 'stress') conflicts.push('Vol backwardation — profile references break down in stress regimes');
+    return { confirms, conflicts };
+  };
+
+  // 1. Unfinished extreme — a poor high/low, or a close right at the extreme.
+  // Both mean the auction never completed there, which is the profile's
+  // highest-quality "it comes back" setup.
+  if (p.extremes.poorHigh || p.extremes.poorLow || p.extremes.highAtClose || p.extremes.lowAtClose) {
+    const poorHigh = p.extremes.poorHigh || p.extremes.highAtClose;
+    const level = poorHigh ? p.high : p.low;
+    const atClose = poorHigh ? p.extremes.highAtClose : p.extremes.lowAtClose;
+    const { confirms, conflicts } = context();
+    confirms.push(
+      atClose
+        ? `Session closed AT the ${poorHigh ? 'high' : 'low'} (${f(level)}) — the auction was still running there at the bell, so it is unfinished rather than rejected`
+        : `${poorHigh ? 'High' : 'Low'} at ${f(level)} printed by multiple brackets with no excess — the auction never finished there`,
+    );
+    if (i.gamma?.regime === 'negative') confirms.push('Negative dealer gamma: hedging extends the sweep once it starts');
+    out.push({
+      id: `tech-unfinished-${poorHigh ? 'high' : 'low'}-${p.date}`,
+      domain: 'technicals',
+      title: `Unfinished business: ${atClose ? `close at the ${poorHigh ? 'high' : 'low'}` : `poor ${poorHigh ? 'high' : 'low'}`} at ${f(level)}`,
+      instrument: 'ES',
+      bias: poorHigh ? 'long' : 'short',
+      timeWindow: 'Next US session — most often resolved in the first two hours or the last one',
+      thesis: atClose
+        ? `The ${p.date} session closed at its ${poorHigh ? 'high' : 'low'} of ${f(level)}. The prints at that extreme belong to the closing bracket, which means the auction never got the chance to finish — no excess formed, and the inventory built into the close is still there. Sessions that end at an extreme usually probe beyond it early the next day; that probe either fails (the trade against it) or gets accepted (the continuation).`
+        : `The ${p.date} session left a POOR ${poorHigh ? 'HIGH' : 'LOW'} at ${f(level)}: multiple 30-minute brackets printed the extreme with no tail beyond it, meaning the auction was cut short rather than rejected. Poor extremes are unfinished business — the market returns to complete them far more often than it leaves them alone. The trade is the move TO and THROUGH the level, not a fade of it.`,
+      trigger: `Price rotating toward ${f(level)} with the ${poorHigh ? 'value high' : 'value low'} (${f(poorHigh ? p.vah : p.val)}) already reclaimed — that is the market accepting the direction, not just probing.`,
+      entry: `Enter on the pullback that holds after ${f(poorHigh ? p.vah : p.val)} is reclaimed; the poor extreme itself is the target, not the entry.`,
+      invalidation: `Acceptance back inside value (${f(p.val)}–${f(p.vah)}) for a full bracket — the market chose to auction elsewhere and the level can sit unfinished for days.`,
+      targets: [`${f(level)} — the poor extreme`, `A clean sweep beyond it, where the excess finally prints`],
+      killSwitch: `A tier-1 catalyst repricing the whole range: profile references are structural, and structure is the first thing news overwrites.`,
+      confirms,
+      conflicts,
+      conviction: convictionOf(4, confirms, conflicts),
+      horizon: 'intraday',
+    });
+  }
+
+  // 2. Balance day — fade the edges back to the POC
+  if (p.dayType === 'normal' || p.dayType === 'non-trend') {
+    const { confirms, conflicts } = context();
+    confirms.push(`${DAY_TYPE_LABEL[p.dayType]}: range only ${p.rangeVsIb.toFixed(2)}× the initial balance — both sides were found early`);
+    if (i.gamma?.regime === 'positive') confirms.push('Positive dealer gamma compresses the range further — balance on balance');
+    if (i.gamma?.regime === 'negative') conflicts.push('Negative gamma amplifies breaks — a balance fade is the wrong side of the hedging flow');
+    out.push({
+      id: `tech-balance-${p.date}`,
+      domain: 'technicals',
+      title: `Balance rules: fade ${f(p.val)} / ${f(p.vah)} toward ${f(p.poc)}`,
+      instrument: 'ES',
+      bias: 'two-way',
+      timeWindow: 'Next US session while the balance holds — abandon at the first accepted break',
+      thesis:
+        `${DAY_TYPE_LABEL[p.dayType]} on ${p.date}: the first hour found both parties and the day never extended (${p.rangeVsIb.toFixed(2)}× IB). Balance means responsive trade — the edges are where the other side steps in, and the POC at ${f(p.poc)} is the magnet. Fade the extremes until the market proves it wants out.`,
+      trigger: `A tag of ${f(p.vah)} or ${f(p.val)} that stalls — no range extension on the bracket that touches it.`,
+      entry: `Fade at the value extreme with a stop just beyond the session ${'extreme'} (${f(p.high)} / ${f(p.low)}); the tighter invalidation is what makes balance trades pay.`,
+      invalidation: `Acceptance outside value — a full 30-minute bracket closing beyond ${f(p.vah)} or ${f(p.val)}. That is the balance breaking, and the break is the NEXT trade, in the opposite direction to your fade.`,
+      targets: [`${f(p.poc)} — the point of control`, 'The opposite value extreme if the rotation carries'],
+      killSwitch: `A balance area that has held for several sessions is storing energy: the eventual break travels further than the range suggests, so stop fading the moment one breaks with volume behind it.`,
+      confirms,
+      conflicts,
+      conviction: convictionOf(3, confirms, conflicts),
+      horizon: 'intraday',
+    });
+  }
+
+  // 3. Neutral-extreme close — one side is trapped overnight
+  if (p.dayType === 'neutral-extreme') {
+    const up = p.closePosition >= 0.5;
+    const { confirms, conflicts } = context();
+    confirms.push(`Both IB extremes were probed and the close held the ${up ? 'high' : 'low'} (${Math.round(p.closePosition * 100)}% of range) — the ${up ? 'short' : 'long'} side is offside into the close`);
+    out.push({
+      id: `tech-neutral-extreme-${p.date}`,
+      domain: 'technicals',
+      title: `Trapped side after a neutral-extreme close`,
+      instrument: 'ES',
+      bias: up ? 'long' : 'short',
+      timeWindow: 'The next session\'s open and first hour — the trapped inventory corrects early',
+      thesis:
+        `${p.date} probed both sides of the initial balance and then closed on the ${up ? 'high' : 'low'}. That combination means one side initiated in the wrong direction and finished the day underwater — a neutral-extreme close is the strongest single-day continuation signal in the profile toolkit, because the trapped positions still have to come off.`,
+      trigger: `An open that holds ${up ? 'above' : 'below'} ${f(p.poc)} — the trapped side did not get relief overnight.`,
+      entry: `Enter with the close's direction on the first pullback that holds ${f(up ? p.vah : p.val)}.`,
+      invalidation: `Trade back through ${f(p.poc)} and acceptance there — the overnight session already released the trapped inventory and the edge is gone.`,
+      targets: [`${f(up ? p.high : p.low)} — the session extreme`, 'Range extension beyond it, where the covering finishes'],
+      killSwitch: `A large opposite-direction gap: the trapped side got its relief overnight, and what looks like your setup is now just a chase.`,
+      confirms,
+      conflicts,
+      conviction: convictionOf(4, confirms, conflicts),
+      horizon: 'intraday',
+    });
+  }
+
+  // 4. Single prints — the shelf that becomes a slide
+  if (p.singlePrints.length >= 2) {
+    const lo = Math.min(...p.singlePrints);
+    const hi = Math.max(...p.singlePrints);
+    const { confirms, conflicts } = context();
+    confirms.push(`${p.singlePrints.length} single-print rows between ${f(lo)} and ${f(hi)} — price ran through without auctioning`);
+    out.push({
+      id: `tech-singles-${p.date}`,
+      domain: 'technicals',
+      title: `Single-print band ${f(lo)}–${f(hi)}`,
+      instrument: 'ES',
+      bias: 'two-way',
+      timeWindow: 'Any session while the band is unfilled',
+      thesis:
+        `The ${p.date} auction left single prints between ${f(lo)} and ${f(hi)} — a band the market moved through so fast that no two-sided trade happened there. While it holds it is a shelf that supports the move; once price trades back INTO it, there is no resting business to slow it down, so it typically travels the whole band quickly.`,
+      trigger: `Price entering the band from ${p.close > hi ? 'above' : 'below'} and failing to hold the first row.`,
+      entry: `Enter with the direction of travel on entry into the band — the whole band is the move, and it is usually fast.`,
+      invalidation: `Price stalling and building time inside the band (3+ brackets) — the singles are being repaired, which removes the reason for the trade.`,
+      targets: [`${f(p.close > hi ? lo : hi)} — the far side of the band`, 'The next reference beyond it'],
+      killSwitch: 'Once the band has been auctioned properly it is a normal area of value — the edge only exists while the prints are single.',
+      confirms,
+      conflicts,
+      conviction: convictionOf(3, confirms, conflicts),
+      horizon: 'intraday',
+    });
+  }
+
+  // 5. Open location vs prior value — the gap decision
+  if (prior) {
+    const loc = openLocation(p.open, prior);
+    if (loc === 'above-range' || loc === 'below-range') {
+      const above = loc === 'above-range';
+      const { confirms, conflicts } = context();
+      confirms.push(`Opened ${above ? 'above' : 'below'} the prior session's ENTIRE range — a binary accept/reject decision`);
+      out.push({
+        id: `tech-gaplocation-${p.date}`,
+        domain: 'technicals',
+        title: `Gap ${above ? 'above' : 'below'} prior range — accept or reject`,
+        instrument: 'ES',
+        bias: 'two-way',
+        timeWindow: 'The first hour decides it; the initial balance is the arbiter',
+        thesis:
+          `The session opened ${above ? 'above' : 'below'} the whole prior range (${f(prior.low)}–${f(prior.high)}). Only two things happen from here: acceptance, where the gap edge at ${f(above ? prior.high : prior.low)} becomes ${above ? 'support' : 'resistance'} and the move continues, or rejection, where price returns through the edge and fills toward ${f(prior.poc)}. Do not guess which — let the first hour tell you.`,
+        trigger: `Acceptance: the initial balance forms entirely ${above ? 'above' : 'below'} ${f(above ? prior.high : prior.low)}. Rejection: price trades back through that edge and holds there for a full bracket.`,
+        entry: `Trade WITH whichever the first hour produced, entering on the retest of the gap edge.`,
+        invalidation: `The opposite condition printing — an accepted gap that fails, or a rejection that reclaims. Both are immediate exits, not "give it room" situations.`,
+        targets: [
+          above ? 'Range extension above the opening hour' : 'Range extension below the opening hour',
+          `On rejection: ${f(prior.poc)} — the prior point of control`,
+        ],
+        killSwitch: `Overnight inventory: if the gap came on a headline that is still developing, the profile read is downstream of the news — trade the news domain first.`,
+        confirms,
+        conflicts,
+        conviction: convictionOf(3, confirms, conflicts),
+        horizon: 'intraday',
+      });
+    }
+  }
+
+  return out;
+}
+
 /* --------------------------- domain 5: flow ------------------------------- */
 
 export function flowIdeas(i: IdeaInputs): TradeIdea[] {
@@ -557,7 +742,7 @@ export interface IdeaBoard {
 }
 
 export function generateIdeas(i: IdeaInputs): IdeaBoard {
-  const ideas = [...centralBankIdeas(i), ...dataIdeas(i), ...narrativeIdeas(i), ...technicalIdeas(i), ...flowIdeas(i)].sort(
+  const ideas = [...centralBankIdeas(i), ...dataIdeas(i), ...narrativeIdeas(i), ...auctionIdeas(i), ...technicalIdeas(i), ...flowIdeas(i)].sort(
     (a, b) => b.conviction - a.conviction,
   );
   const activeDomains = [...new Set(ideas.map((x) => x.domain))];

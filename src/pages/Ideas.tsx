@@ -11,7 +11,8 @@ import {
   type IdeaInputs,
   type TradeIdea,
 } from '../lib/ideas';
-import { fmpOhlcBarUrls, parseFmpOhlc, type OhlcBar } from '../lib/market';
+import { fmpIntradayUrls, fmpOhlcBarUrls, parseFmpIntraday, parseFmpOhlc, type OhlcBar } from '../lib/market';
+import { buildProfile, groupSessions, type SessionProfile } from '../lib/marketProfile';
 import { loadNarrative, type ThemeSeries } from '../lib/narrative';
 import { expectedMove, gammaProfile, loadCboeQuote, loadChain, vixRegime, type ExpectedMove, type GammaProfile, type VixRegime } from '../lib/options';
 import { fetchDailyCloses } from '../lib/reactionLab';
@@ -72,6 +73,7 @@ export default function Ideas() {
   const [indexBars, setIndexBars] = useState<OhlcBar[]>([]);
   const [tltMtd, setTltMtd] = useState<number | null>(null);
   const [earningsCount, setEarningsCount] = useState(0);
+  const [profiles, setProfiles] = useState<{ latest: SessionProfile | null; prior: SessionProfile | null }>({ latest: null, prior: null });
   const [loadedFeeds, setLoadedFeeds] = useState(0);
 
   useEffect(() => {
@@ -107,6 +109,35 @@ export default function Ideas() {
       const rows = await fetchEarnings(todayISO(), to);
       if (alive && rows) { setEarningsCount(rows.length); tick(); }
     })();
+    // the auction: last two completed RTH sessions of the index proxy
+    void (async () => {
+      for (const url of fmpIntradayUrls('SPY', '30min')) {
+        let res: Response;
+        try {
+          res = await fetch(url);
+        } catch {
+          continue;
+        }
+        if (!res.ok) continue;
+        let json: unknown;
+        try {
+          json = await res.json();
+        } catch {
+          continue;
+        }
+        const parsed = parseFmpIntraday(json);
+        if (parsed.length < 10) continue;
+        const days = [...groupSessions(parsed).entries()].sort((a, b) => b[0].localeCompare(a[0]));
+        if (alive && days.length) {
+          setProfiles({
+            latest: days[0] ? buildProfile(days[0][1], { date: days[0][0] }) : null,
+            prior: days[1] ? buildProfile(days[1][1], { date: days[1][0] }) : null,
+          });
+          tick();
+        }
+        return;
+      }
+    })();
 
     return () => { alive = false; };
   }, []);
@@ -126,9 +157,11 @@ export default function Ideas() {
       tltMtd,
       daysToOpex: daysToOpex(),
       earningsCount,
+      profile: profiles.latest,
+      priorProfile: profiles.prior,
     };
     return generateIdeas(inputs);
-  }, [events, cot, themes, corrBreaks, gamma, em, vol, indexBars, tltMtd, earningsCount]);
+  }, [events, cot, themes, corrBreaks, gamma, em, vol, indexBars, tltMtd, earningsCount, profiles]);
 
   return (
     <div className="stack" style={{ gap: 14 }}>
