@@ -397,6 +397,111 @@ export function hasDoubleDistribution(rows: TpoRow[]): boolean {
   return belowMax >= 3 && aboveMax >= 3;
 }
 
+/* ---------------------------- multi-session ------------------------------- */
+
+/**
+ * A bucket size that works across SEVERAL sessions.
+ *
+ * Each session left to itself picks a bucket from its own range, which is right
+ * for a single profile but wrong the moment you put profiles side by side: the
+ * rows would not line up and a price would sit at different heights in adjacent
+ * columns. Sizing off the combined range gives every session the same grid.
+ */
+export function sharedBucket(bars: IntradayBar[], targetRows = 60): number {
+  const clean = bars.filter((b) => isFinite(b.high) && isFinite(b.low));
+  if (!clean.length) return 0.25;
+  const high = Math.max(...clean.map((b) => b.high));
+  const low = Math.min(...clean.map((b) => b.low));
+  return autoBucket(high - low, targetRows);
+}
+
+/**
+ * Merge sessions into one composite profile — the "how has the market
+ * distributed its time over the whole period" view. TPO counts and volume add
+ * up per price; the value area is recomputed over the merged distribution.
+ * Letters are dropped (they only mean something inside one session).
+ *
+ * Sessions must share a bucket (see sharedBucket) or the rows will not align.
+ */
+export function compositeProfile(sessions: SessionProfile[]): SessionProfile | null {
+  const usable = sessions.filter((s) => s.rows.length);
+  if (!usable.length) return null;
+  const bucket = usable[0].bucket;
+
+  const merged = new Map<number, { tpoCount: number; volume: number }>();
+  for (const s of usable) {
+    for (const r of s.rows) {
+      const cur = merged.get(r.price) ?? { tpoCount: 0, volume: 0 };
+      cur.tpoCount += r.tpoCount;
+      cur.volume += r.volume;
+      merged.set(r.price, cur);
+    }
+  }
+  const rows: TpoRow[] = [...merged.entries()]
+    .map(([price, v]) => ({
+      price,
+      letters: '',
+      tpoCount: v.tpoCount,
+      volume: v.volume,
+      single: v.tpoCount === 1,
+    }))
+    .sort((a, b) => a.price - b.price);
+  if (!rows.length) return null;
+
+  const { poc, vah, val } = tpoValueArea(rows);
+  const vpoc = rows.reduce((best, r) => (r.volume > best.volume ? r : best), rows[0]).price;
+  const ordered = [...usable].sort((a, b) => a.date.localeCompare(b.date));
+  const first = ordered[0];
+  const last = ordered[ordered.length - 1];
+
+  return {
+    date: `${first.date}→${last.date}`,
+    symbol: first.symbol,
+    bucket,
+    rows,
+    periods: usable.reduce((n, s) => n + s.periods, 0),
+    open: first.open,
+    close: last.close,
+    high: Math.max(...usable.map((s) => s.high)),
+    low: Math.min(...usable.map((s) => s.low)),
+    range: Math.max(...usable.map((s) => s.high)) - Math.min(...usable.map((s) => s.low)),
+    totalVolume: usable.reduce((n, s) => n + s.totalVolume, 0),
+    poc,
+    vah,
+    val,
+    vpoc,
+    // an initial balance belongs to a single session; a composite has none
+    ibHigh: last.ibHigh,
+    ibLow: last.ibLow,
+    ibRange: last.ibRange,
+    extUp: 0,
+    extDown: 0,
+    rangeVsIb: 0,
+    closePosition: 0.5,
+    dayType: 'incomplete',
+    openType: 'unknown',
+    singlePrints: rows.filter((r, i) => r.single && i > 0 && i < rows.length - 1).map((r) => r.price),
+    extremes: { buyingTailTicks: 0, sellingTailTicks: 0, poorHigh: false, poorLow: false, highAtClose: false, lowAtClose: false },
+  };
+}
+
+/**
+ * A POC left "naked" — never traded back through by any LATER session. These
+ * are the unfinished magnets traders carry forward for weeks; price returning
+ * to one is a high-quality target because no two-sided auction has repaired it.
+ * Sessions may be in any order; the newest is ignored (nothing follows it yet).
+ */
+export function nakedPocs(sessions: SessionProfile[]): { date: string; price: number }[] {
+  const ordered = [...sessions].sort((a, b) => a.date.localeCompare(b.date));
+  const out: { date: string; price: number }[] = [];
+  for (let i = 0; i < ordered.length - 1; i++) {
+    const poc = ordered[i].poc;
+    const touchedLater = ordered.slice(i + 1).some((s) => poc >= s.low && poc <= s.high);
+    if (!touchedLater) out.push({ date: ordered[i].date, price: poc });
+  }
+  return out;
+}
+
 /* ------------------------ day-over-day relationships ---------------------- */
 
 export type ValueRelation = 'higher' | 'lower' | 'overlapping-higher' | 'overlapping-lower' | 'inside' | 'outside' | 'unchanged';
