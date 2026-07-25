@@ -396,7 +396,7 @@ confirms add, conflicts subtract — and the board sorts by it. When nothing qua
 cross-links to the Terminal (regime backdrop), Catalysts (the print study) and the Trade Desk
 (stage the order on the DOM when the trigger fires).
 
-### Charts — TradingView inside the platform
+### Charts — TradingView, plus the TPO chart TradingView won't give you
 The Charts section embeds TradingView's free Advanced Chart widget: full price history, live
 updating quotes, and the complete drawing/indicator toolset, rendered in Lisbon time like the rest
 of the app. One-click chips cover the platform's instruments (ES, NQ, RTY, YM, ZN, ZB, 6E, GC, CL,
@@ -408,6 +408,24 @@ tick-for-tick in shape and are always available — with a **Futures** toggle fo
 contract where the embed allows it. A teaching block explains how to combine the chart with the
 other sections (draw the dealer levels from Options & Vol, time-stamp the session opens and
 release times, use VWAP as fair value) and why the ZN/ZB yield proxies move inverse to price.
+
+A toggleable **indicator row** drives the widget's built-in studies — VWAP, Volume, Pivot Points,
+EMA, Bollinger, ATR, RSI, MACD, Ichimoku — each chip carrying a one-line note on what it's actually
+for (and what it isn't: RSI divergence *at* a dealer level means something, on its own it doesn't).
+Your selection persists.
+
+Below the widget sits a **native Market Profile (TPO) chart**, because TradingView cannot host one:
+its own Volume Profile is a paid-plan study that free embeds refuse, and embeds do not run custom
+indicators. So it is rendered from the platform's own auction engine over 30-minute RTH bars —
+several sessions side by side on **one shared price grid** (sized off the combined range, so a price
+sits at the same height in every column), with the value area shaded, the time POC ◆ and volume
+POC ◇ marked, and the initial balance railed. Switch between the **TPO** letter distribution (one
+letter per bracket — width is time spent) and the **Volume** histogram, and between **Split**
+(session by session) and **Composite** (all sessions merged into one distribution, letters dropped
+since they only mean something inside a session). **Naked POCs** — points of control that no later
+session ever traded back through — are flagged in red on the price axis; those are the unfinished
+magnets worth carrying forward. Prices are the cash-session proxy's, clearly labelled, with the
+Market Profile section one click away for the full read and the conversion into contract scale.
 
 ### Trade Desk — live trading on Rithmic, in the browser
 With the R | Protocol dev kit in hand, the platform now speaks Rithmic's wire protocol directly:
