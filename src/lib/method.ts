@@ -203,6 +203,12 @@ export const CONNECTS: Record<string, Connection[]> = {
     { route: '/day', label: 'Preparation', why: 'your IF-THEN plan and risk limit live here — execute the plan, do not improvise at the ticket' },
     { route: '/risk', label: 'Risk Guardrail', why: 'know today\'s loss limit and safe size before you arm live trading' },
   ],
+  flows: [
+    { route: '/macro', label: 'Macro Map', why: 'the yield curve and narrative layer explain WHY the ratios are moving' },
+    { route: '/intel', label: 'Market Intel', why: 'a flow rotation into a market where specs are already max long is the squeeze setup' },
+    { route: '/ideas', label: 'Conviction Board', why: 'cross-asset agreement or conflict feeds straight into an idea\'s conviction score' },
+    { route: '/terminal', label: 'Edge Terminal', why: 'the regime read and the flow read should agree — when they do not, trade smaller' },
+  ],
   profile: [
     { route: '/ideas', label: 'Conviction Board', why: 'the auction read becomes concrete setups — poor extremes, balance fades, trapped-side continuation' },
     { route: '/desk', label: 'Trade Desk', why: 'these levels are where the DOM matters: watch the tape defend value and the extremes on the ladder' },

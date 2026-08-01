@@ -172,6 +172,18 @@ export function intradayBarUrls(symbol: string, interval = '30min', opts: { from
   ];
 }
 
+/**
+ * Every candidate for DAILY bars, best first — FMP, then the keyless relay.
+ * Same fallback logic as the intraday path so a plan without history, or no key
+ * at all, still charts. Both sources emit rows parseFmpDaily/parseFmpOhlc read.
+ */
+export function dailyBarUrls(symbol: string, opts: { from?: string; to?: string; range?: string } = {}): string[] {
+  return [
+    ...fmpOhlcBarUrls(symbol, opts),
+    `/api/yahoo?symbol=${encodeURIComponent(symbol)}&interval=1d&range=${opts.range ?? '1y'}`,
+  ];
+}
+
 /** Pure: parse intraday bars (both FMP shapes emit a bare array here). */
 export function parseFmpIntraday(json: unknown): { time: string; open: number; high: number; low: number; close: number; volume: number | null }[] {
   const rows = Array.isArray(json) ? json : (json as { historical?: unknown[] })?.historical;
