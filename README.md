@@ -338,6 +338,29 @@ futures, with session (pre-market / after-close), which contracts they hit, and 
 Every block loads independently and degrades honestly when a feed is down; nothing is a black box —
 each line of the verdict names the input that produced it.
 
+### Flows — cross-asset money flow, the way a macro desk reads it
+Correlation tables are everywhere; reading FLOW from them is not. This section puts instruments on one
+**comparable axis** — rebased to 100, or z-scored, never raw price, because a $600 index and a $25 ETF
+cannot share a y-axis without one looking flat — and then asks what the relationships are doing.
+
+The **money-flow map** is the heart of it: the canonical ratios a macro desk keeps on one screen
+(stocks/bonds, growth/broad, small/large, cyclical/defensive, copper/gold, high-yield/Treasuries,
+semis/market, EM/US). Each row is a flow, not a price: the numerator is what money moves *into* when the
+line rises, and each carries what rising and falling actually mean. A **desk read** counts the risk-on
+and risk-off votes and — more usefully — flags the *disagreements*, because those are the information:
+credit contradicting equity (credit is right more often at turns), breadth lagging a rising index
+(narrowing advance), semis not confirming, copper/gold marking growth down.
+
+The **pair lab** takes any two instruments and shows rolling correlation, rolling beta, and a **lead–lag
+cross-correlation** — correlation at every lag from −10 to +10 sessions, so you can see which market
+moves *first* and by how much. It refuses to claim a lead unless it beats the same-day correlation by a
+clear margin, because a lag fitted after the fact is not a signal. The **correlation regime** panel
+tracks average pairwise correlation across the basket: the dial that decides whether diversification is
+working at all — near 1 you do not have five positions, you have one position five times. A **rotation
+table** ranks relative strength against SPY across 5/20/60-day horizons with a risk-adjusted column and
+an accelerating/fading gear flag. Ratios whose legs stop updating are marked **stale** rather than
+reported as an enormous fictitious flow, and excluded from the vote. Runs keyless via the relay.
+
 ### Market Profile — the auction, computed
 The technical edge domain is Market Profile, order flow and volume analysis, so the platform computes
 the profile rather than asking you to describe it. From 30-minute bars it builds the **TPO and volume

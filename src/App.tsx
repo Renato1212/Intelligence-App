@@ -17,6 +17,7 @@ import Charts from './pages/Charts';
 import Terminal from './pages/Terminal';
 import Ideas from './pages/Ideas';
 import Profile from './pages/Profile';
+import Flows from './pages/Flows';
 import TradeDesk from './pages/TradeDesk';
 import Method from './pages/Method';
 import Journal from './pages/Journal';
@@ -50,6 +51,7 @@ const I = {
   tradedesk: <path d="M3 3v18h18M7 15l3-4 3 3 5-7M18 7h3v3" />,
   ideas: <path d="M12 2a7 7 0 00-4 12.7c.6.5 1 1.5 1 2.3h6c0-.8.4-1.8 1-2.3A7 7 0 0012 2zM9 20h6M10 23h4" />,
   profile: <path d="M4 3v18M6 5h9M6 8h13M6 11h11M6 14h6M6 17h3M6 20h5" />,
+  flows: <path d="M3 17c3 0 4-8 7-8s3 5 6 5 3-6 5-6M3 21h18M4 7h4M4 4h7" />,
   method: <path d="M4 6h16M4 12h10M4 18h7M18 15l3 3-3 3" />,
   risk: <path d="M12 2l8 4v6c0 5-3.4 8.5-8 10-4.6-1.5-8-5-8-10V6l8-4zM12 8v4M12 16h.01" />,
   account: <path d="M12 12a4 4 0 100-8 4 4 0 000 8zM4 21c0-4.4 3.6-8 8-8s8 3.6 8 8" />,
@@ -151,6 +153,7 @@ function Shell() {
           <Nav to="/ideas" icon={I.ideas} label="Conviction Board" />
           <Nav to="/intel" icon={I.intel} label="Market Intel" />
           <Nav to="/macro" icon={I.macro} label="Macro Map" />
+          <Nav to="/flows" icon={I.flows} label="Flows" />
           <Nav to="/profile" icon={I.profile} label="Market Profile" />
           <Nav to="/optvol" icon={I.optvol} label="Options & Vol" />
           <Nav to="/catalysts" icon={I.catalysts} label="Catalysts" />
@@ -186,6 +189,7 @@ function Shell() {
             <Route path="/terminal" element={<Terminal />} />
             <Route path="/ideas" element={<Ideas />} />
             <Route path="/profile" element={<Profile />} />
+            <Route path="/flows" element={<Flows />} />
             <Route path="/desk" element={<TradeDesk />} />
             <Route path="/trades" element={<Trades />} />
             <Route path="/trades/:id" element={<TradeDetail />} />
