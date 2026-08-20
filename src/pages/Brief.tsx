@@ -9,6 +9,7 @@ import Catalysts from './Catalysts';
 import Flows from './Flows';
 import OptionsVol from './OptionsVol';
 import MacroMap from './MacroMap';
+import MarketIntel from './MarketIntel';
 
 /**
  * Pre-EU brief — the "Before european session" block of the routine, as a
@@ -70,6 +71,7 @@ export default function Brief() {
                 { id: 'flow', label: 'Flow calendar', body: <Flows /> },
                 { id: 'opt', label: 'Options & vol', body: <OptionsVol /> },
                 { id: 'macro', label: 'Macro', body: <MacroMap /> },
+                { id: 'pos', label: 'Positioning', body: <MarketIntel /> },
               ]}
             />
           ),
