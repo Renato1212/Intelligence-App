@@ -343,3 +343,13 @@ ul.check li::marker { color: var(--gold); }
   .sidebar { width: 100%; height: auto; position: static; flex-direction: row; flex-wrap: wrap; align-items: center; }
   .main { padding: 18px 14px 40px; }
 }
+
+/* --- routine hubs: embedded screens keep their content, drop their heading --- */
+.embedded .page-head { display: none; }
+.embedded > .stack > .page-head { display: none; }
+
+/* Session ribbon — the app's spine (build spec §10) */
+.ribbon { position: relative; height: 34px; border: 1px solid var(--hairline); border-radius: 6px; overflow: hidden; background: var(--surface); }
+.ribbon-block { position: absolute; top: 0; bottom: 0; display: flex; align-items: center; justify-content: center; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); border-right: 1px solid var(--hairline); }
+.ribbon-now { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--gold); }
+.ribbon-ev { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--loss); }
