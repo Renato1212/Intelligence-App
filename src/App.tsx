@@ -4,33 +4,37 @@ import { AuthGate } from './components/AuthGate';
 import { ToastProvider, useToast } from './components/ui';
 import { currentUser, isLocalOnly, onSyncState, supabase, type SyncState } from './lib/cloud';
 import { connectKeyFromHash } from './lib/market';
-import Dashboard from './pages/Dashboard';
-import Trades from './pages/Trades';
+// The routine — one screen per block of Trading Routine.md
+import Today from './pages/Today';
+import Brief from './pages/Brief';
+import Plan from './pages/Plan';
+import Reassess from './pages/Reassess';
+import Live from './pages/Live';
+import Debrief from './pages/Debrief';
+import Archive from './pages/Archive';
+import Data from './pages/Data';
+// Deep links into a single record or panel
 import TradeDetail from './pages/TradeDetail';
 import TradingDay from './pages/TradingDay';
-import Catalysts from './pages/Catalysts';
-import MarketIntel from './pages/MarketIntel';
-import MacroMap from './pages/MacroMap';
-import OptionsVol from './pages/OptionsVol';
-import Sessions from './pages/Sessions';
-import Charts from './pages/Charts';
-import Terminal from './pages/Terminal';
-import Ideas from './pages/Ideas';
-import Profile from './pages/Profile';
-import Flows from './pages/Flows';
-import TradeDesk from './pages/TradeDesk';
-import Method from './pages/Method';
+import Trades from './pages/Trades';
 import Journal from './pages/Journal';
 import Analytics from './pages/Analytics';
 import Risk from './pages/Risk';
-import Playbook from './pages/Playbook';
-import Strategies from './pages/Strategies';
+import Catalysts from './pages/Catalysts';
+import MarketIntel from './pages/MarketIntel';
 import ImportPage from './pages/Import';
-import AICoach from './pages/AICoach';
-import Account from './pages/Account';
 import Settings from './pages/Settings';
+import Account from './pages/Account';
 
 const I = {
+  today: <path d="M3 3h7v9H3zM14 3h7v5h-7zM14 12h7v9h-7zM3 16h7v5H3z" />,
+  brief: <path d="M4 4h12a2 2 0 012 2v14H6a2 2 0 01-2-2V4zM9 9h6M9 13h4" />,
+  plan: <path d="M9 3h6l1 3h4v15H4V6h4l1-3zM9 12h6M9 16h6" />,
+  reassess: <path d="M21 12a9 9 0 11-3-6.7M21 4v5h-5" />,
+  live: <path d="M3 17l6-6 4 4 8-8M15 7h6v6" />,
+  debrief: <path d="M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5M9 20h6" />,
+  archive: <path d="M3 7h18v13H3zM3 3h18v4H3zM10 12h4" />,
+  data: <path d="M12 3c4.4 0 8 1.3 8 3s-3.6 3-8 3-8-1.3-8-3 3.6-3 8-3zM4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3" />,
   dashboard: <path d="M3 3h7v9H3zM14 3h7v5h-7zM14 12h7v9h-7zM3 16h7v5H3z" />,
   trades: <path d="M3 17l6-6 4 4 8-8M15 7h6v6" />,
   journal: <path d="M4 4h12a2 2 0 012 2v14H6a2 2 0 01-2-2V4zM4 4v14M9 9h6M9 13h4" />,
@@ -144,65 +148,43 @@ function Shell() {
               <div className="brand-sub">Trader Development</div>
             </div>
           </div>
-          <div className="nav-section">Performance</div>
-          <Nav to="/" icon={I.dashboard} label="Dashboard" end />
-          <Nav to="/analytics" icon={I.analytics} label="Edge Analytics" />
-          <Nav to="/risk" icon={I.risk} label="Risk Guardrail" />
-          <div className="nav-section">Markets</div>
-          <Nav to="/terminal" icon={I.terminal} label="Edge Terminal" />
-          <Nav to="/ideas" icon={I.ideas} label="Conviction Board" />
-          <Nav to="/intel" icon={I.intel} label="Market Intel" />
-          <Nav to="/macro" icon={I.macro} label="Macro Map" />
-          <Nav to="/flows" icon={I.flows} label="Flows" />
-          <Nav to="/profile" icon={I.profile} label="Market Profile" />
-          <Nav to="/optvol" icon={I.optvol} label="Options & Vol" />
-          <Nav to="/catalysts" icon={I.catalysts} label="Catalysts" />
-          <Nav to="/sessions" icon={I.sessions} label="Session Clock" />
-          <Nav to="/charts" icon={I.charts} label="Charts" />
-          <div className="nav-section">Execution</div>
-          <Nav to="/desk" icon={I.tradedesk} label="Trade Desk" />
-          <div className="nav-section">Journal</div>
-          <Nav to="/day" icon={I.day} label="Trading Day" />
-          <Nav to="/trades" icon={I.trades} label="Trades" />
-          <Nav to="/journal" icon={I.journal} label="Daily Debrief" />
-          <div className="nav-section">Development</div>
-          <Nav to="/method" icon={I.method} label="The Method" />
-          <Nav to="/playbook" icon={I.playbook} label="Playbook" />
-          <Nav to="/strategies" icon={I.strategies} label="Strategy Lab" />
-          <Nav to="/ai-coach" icon={I.ai} label="AI Coach" />
-          <div className="nav-section">Data</div>
-          <Nav to="/import" icon={I.import} label="Import" />
-          <Nav to="/settings" icon={I.settings} label="Settings" />
+          <div className="nav-section">The loop</div>
+          <Nav to="/" icon={I.today} label="Today" end />
+          <Nav to="/brief" icon={I.brief} label="EU brief" />
+          <Nav to="/plan" icon={I.plan} label="Plan" />
+          <Nav to="/reassess" icon={I.reassess} label="Reassess" />
+          <Nav to="/live" icon={I.live} label="Live" />
+          <Nav to="/debrief" icon={I.debrief} label="Debrief" />
+          <div className="nav-section">Body of work</div>
+          <Nav to="/archive" icon={I.archive} label="Archive" />
+          <Nav to="/data" icon={I.data} label="Data" />
           <span style={{ flex: 1 }} />
           <AccountStatus />
         </aside>
         <main className="main">
           <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/day" element={<TradingDay />} />
-            <Route path="/catalysts" element={<Catalysts />} />
-            <Route path="/intel" element={<MarketIntel />} />
-            <Route path="/macro" element={<MacroMap />} />
-            <Route path="/optvol" element={<OptionsVol />} />
-            <Route path="/sessions" element={<Sessions />} />
-            <Route path="/charts" element={<Charts />} />
-            <Route path="/terminal" element={<Terminal />} />
-            <Route path="/ideas" element={<Ideas />} />
-            <Route path="/profile" element={<Profile />} />
-            <Route path="/flows" element={<Flows />} />
-            <Route path="/desk" element={<TradeDesk />} />
-            <Route path="/trades" element={<Trades />} />
+            {/* The routine — the app's spine */}
+            <Route path="/" element={<Today />} />
+            <Route path="/brief" element={<Brief />} />
+            <Route path="/plan" element={<Plan />} />
+            <Route path="/reassess" element={<Reassess />} />
+            <Route path="/live" element={<Live />} />
+            <Route path="/debrief" element={<Debrief />} />
+            <Route path="/archive" element={<Archive />} />
+            <Route path="/data" element={<Data />} />
+            {/* Deep links into a single record or panel — reachable, not on the surface */}
             <Route path="/trades/:id" element={<TradeDetail />} />
+            <Route path="/day" element={<TradingDay />} />
+            <Route path="/trades" element={<Trades />} />
             <Route path="/journal" element={<Journal />} />
             <Route path="/analytics" element={<Analytics />} />
             <Route path="/risk" element={<Risk />} />
-            <Route path="/method" element={<Method />} />
-            <Route path="/playbook" element={<Playbook />} />
-            <Route path="/strategies" element={<Strategies />} />
-            <Route path="/ai-coach" element={<AICoach />} />
+            <Route path="/catalysts" element={<Catalysts />} />
+            <Route path="/intel" element={<MarketIntel />} />
             <Route path="/import" element={<ImportPage />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/account" element={<Account />} />
+            <Route path="*" element={<Today />} />
           </Routes>
         </main>
       </div>
