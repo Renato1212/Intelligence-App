@@ -10,6 +10,7 @@ import Account from './Account';
 export default function Data() {
   return (
     <Hub
+      param="step"
       title="Data"
       sub="Imports, sources and account. Off the trading surface by design."
       steps={[

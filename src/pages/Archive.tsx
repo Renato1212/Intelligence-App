@@ -12,6 +12,7 @@ import Journal from './Journal';
 export default function Archive() {
   return (
     <Hub
+      param="step"
       title="Archive"
       sub="Three years of sessions as a searchable body of knowledge, not a pile of forgotten days."
       steps={[

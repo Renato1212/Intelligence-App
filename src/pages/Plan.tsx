@@ -9,6 +9,7 @@ import Risk from './Risk';
 export default function Plan() {
   return (
     <Hub
+      param="step"
       title="Plan"
       block="Before european session"
       sub="Scenarios, locations and size — one page, decided before the open."

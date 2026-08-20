@@ -12,7 +12,7 @@ export function Connects({ id }: { id: string }) {
   return (
     <div className="card" style={{ borderStyle: 'dashed' }}>
       <div className="card-title" style={{ marginBottom: 8 }}>
-        Use this with… <span className="hint">the combinations are the edge — <Link to="/method" style={{ color: 'var(--gold)' }}>see the full method</Link></span>
+        Use this with… <span className="hint">the combinations are the edge — <Link to="/archive?step=method" style={{ color: 'var(--gold)' }}>see the full method</Link></span>
       </div>
       <div className="stack" style={{ gap: 6 }}>
         {items.map((c) => (

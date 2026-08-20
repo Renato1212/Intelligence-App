@@ -347,6 +347,10 @@ ul.check li::marker { color: var(--gold); }
 /* --- routine hubs: embedded screens keep their content, drop their heading --- */
 .embedded .page-head { display: none; }
 .embedded > .stack > .page-head { display: none; }
+/* Some panels render the title without a .page-head wrapper — the routine
+   screen already supplies the heading, so suppress theirs either way. */
+.embedded .page-title,
+.embedded .page-sub { display: none; }
 
 /* Session ribbon — the app's spine (build spec §10) */
 .ribbon { position: relative; height: 34px; border: 1px solid var(--hairline); border-radius: 6px; overflow: hidden; background: var(--surface); }
