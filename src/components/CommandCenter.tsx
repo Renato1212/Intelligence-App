@@ -83,10 +83,10 @@ export function CommandCenter({ trades }: { trades: Trade[] }) {
         <div className="card-title" style={{ margin: 0 }}>
           Command center <span className="hint">{weekdayName(today)} — plan, execute, review</span>
         </div>
-        <span className="small" style={{ cursor: 'pointer', color: 'var(--gold)' }} onClick={() => nav('/day')}>Open Trading Day →</span>
+        <span className="small" style={{ cursor: 'pointer', color: 'var(--gold)' }} onClick={() => nav('/debrief')}>Open debrief →</span>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10 }}>
-        <Cell title="Today's catalysts" accent={highToday.length ? 'var(--loss)' : 'var(--profit)'} onClick={() => nav('/catalysts')}>
+        <Cell title="Today's catalysts" accent={highToday.length ? 'var(--loss)' : 'var(--profit)'} onClick={() => nav('/brief?step=environment&panel=cal')}>
           {events.length === 0 ? (
             <div><b style={{ fontSize: 20 }}>Quiet</b><div className="muted small">No tier-1 releases — technicals / flow day.</div></div>
           ) : (
@@ -101,7 +101,7 @@ export function CommandCenter({ trades }: { trades: Trade[] }) {
           )}
         </Cell>
 
-        <Cell title="Market focus" accent={focus.strong ? 'var(--gold)' : 'var(--hairline)'} onClick={() => nav('/intel')}>
+        <Cell title="Market focus" accent={focus.strong ? 'var(--gold)' : 'var(--hairline)'} onClick={() => nav('/brief?step=environment&panel=pos')}>
           {focus.top.length === 0 ? (
             <div><b style={{ fontSize: 20 }}>—</b><div className="muted small">Open Market Intel to pull positioning.</div></div>
           ) : (
@@ -116,12 +116,12 @@ export function CommandCenter({ trades }: { trades: Trade[] }) {
           )}
         </Cell>
 
-        <Cell title="Today's preparation" accent={prep ? 'var(--profit)' : 'var(--dom-news)'} onClick={() => nav('/day?tab=prep')}>
+        <Cell title="Today's preparation" accent={prep ? 'var(--profit)' : 'var(--dom-news)'} onClick={() => nav('/brief?step=writeup')}>
           <b style={{ fontSize: 20 }}>{prep ? 'Ready' : 'Not started'}</b>
           <div className="muted small">{prep ? 'Prep saved — review your hypotheses.' : 'Build your plan before the open.'}</div>
         </Cell>
 
-        <Cell title="Review queue" accent={queue.untagged || queue.ungraded ? 'var(--gold)' : 'var(--profit)'} onClick={() => nav('/trades')}>
+        <Cell title="Review queue" accent={queue.untagged || queue.ungraded ? 'var(--gold)' : 'var(--profit)'} onClick={() => nav('/archive?step=trades')}>
           {queue.untagged === 0 && queue.ungraded === 0 && queue.undescribed === 0 ? (
             <div><b style={{ fontSize: 20, color: 'var(--profit)' }}>Clear</b><div className="muted small">Every trade tagged, described &amp; graded.</div></div>
           ) : (
@@ -134,7 +134,7 @@ export function CommandCenter({ trades }: { trades: Trade[] }) {
           )}
         </Cell>
 
-        <Cell title="Edge trend" accent={trend && trend.delta >= 0 ? 'var(--profit)' : 'var(--loss)'} onClick={() => nav('/analytics')}>
+        <Cell title="Edge trend" accent={trend && trend.delta >= 0 ? 'var(--profit)' : 'var(--loss)'} onClick={() => nav('/archive?step=edge')}>
           {!trend ? (
             <div><b style={{ fontSize: 20 }}>—</b><div className="muted small">More trades needed to read the trend.</div></div>
           ) : (

@@ -9,22 +9,42 @@ import Today from './pages/Today';
 import Brief from './pages/Brief';
 import Plan from './pages/Plan';
 import Reassess from './pages/Reassess';
-import Live from './pages/Live';
 import Debrief from './pages/Debrief';
 import Archive from './pages/Archive';
 import Data from './pages/Data';
 // Deep links into a single record or panel
 import TradeDetail from './pages/TradeDetail';
-import TradingDay from './pages/TradingDay';
-import Trades from './pages/Trades';
-import Journal from './pages/Journal';
-import Analytics from './pages/Analytics';
-import Risk from './pages/Risk';
-import Catalysts from './pages/Catalysts';
-import MarketIntel from './pages/MarketIntel';
-import ImportPage from './pages/Import';
-import Settings from './pages/Settings';
-import Account from './pages/Account';
+import { Navigate } from 'react-router-dom';
+
+/**
+ * Panels moved inside the routine step that owns them. These aliases keep
+ * every existing link, bookmark and in-app cross-reference working, landing on
+ * the exact panel rather than silently falling through to Today.
+ */
+const ALIASES: [string, string][] = [
+  ['/terminal', '/brief?step=fundamentals'],
+  ['/charts', '/brief?step=technicals&panel=charts'],
+  ['/profile', '/brief?step=technicals&panel=profile'],
+  ['/catalysts', '/brief?step=environment&panel=cal'],
+  ['/flows', '/brief?step=environment&panel=flow'],
+  ['/optvol', '/brief?step=environment&panel=opt'],
+  ['/macro', '/brief?step=environment&panel=macro'],
+  ['/intel', '/brief?step=environment&panel=pos'],
+  ['/sessions', '/'],
+  ['/ideas', '/plan?step=ideas'],
+  ['/risk', '/plan?step=size'],
+  ['/desk', '/debrief'],
+  ['/live', '/'],
+  ['/day', '/debrief'],
+  ['/journal', '/archive?step=debriefs'],
+  ['/analytics', '/archive?step=edge'],
+  ['/strategies', '/archive?step=patterns'],
+  ['/method', '/archive?step=method'],
+  ['/trades', '/archive?step=trades'],
+  ['/import', '/data?step=import'],
+  ['/settings', '/data?step=settings'],
+  ['/account', '/data?step=account'],
+];
 
 const I = {
   today: <path d="M3 3h7v9H3zM14 3h7v5h-7zM14 12h7v9h-7zM3 16h7v5H3z" />,
@@ -153,7 +173,6 @@ function Shell() {
           <Nav to="/brief" icon={I.brief} label="EU brief" />
           <Nav to="/plan" icon={I.plan} label="Plan" />
           <Nav to="/reassess" icon={I.reassess} label="Reassess" />
-          <Nav to="/live" icon={I.live} label="Live" />
           <Nav to="/debrief" icon={I.debrief} label="Debrief" />
           <div className="nav-section">Body of work</div>
           <Nav to="/archive" icon={I.archive} label="Archive" />
@@ -168,22 +187,14 @@ function Shell() {
             <Route path="/brief" element={<Brief />} />
             <Route path="/plan" element={<Plan />} />
             <Route path="/reassess" element={<Reassess />} />
-            <Route path="/live" element={<Live />} />
             <Route path="/debrief" element={<Debrief />} />
             <Route path="/archive" element={<Archive />} />
             <Route path="/data" element={<Data />} />
-            {/* Deep links into a single record or panel — reachable, not on the surface */}
+            {/* A single trade keeps its own record route */}
             <Route path="/trades/:id" element={<TradeDetail />} />
-            <Route path="/day" element={<TradingDay />} />
-            <Route path="/trades" element={<Trades />} />
-            <Route path="/journal" element={<Journal />} />
-            <Route path="/analytics" element={<Analytics />} />
-            <Route path="/risk" element={<Risk />} />
-            <Route path="/catalysts" element={<Catalysts />} />
-            <Route path="/intel" element={<MarketIntel />} />
-            <Route path="/import" element={<ImportPage />} />
-            <Route path="/settings" element={<Settings />} />
-            <Route path="/account" element={<Account />} />
+            {ALIASES.map(([from, to]) => (
+              <Route key={from} path={from} element={<Navigate to={to} replace />} />
+            ))}
             <Route path="*" element={<Today />} />
           </Routes>
         </main>

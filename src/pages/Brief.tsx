@@ -10,6 +10,7 @@ import Flows from './Flows';
 import OptionsVol from './OptionsVol';
 import MacroMap from './MacroMap';
 import MarketIntel from './MarketIntel';
+import { RegimePanel } from '../components/RegimePanel';
 
 /**
  * Pre-EU brief — the "Before european session" block of the routine, as a
@@ -22,6 +23,7 @@ export default function Brief() {
 
   return (
     <Hub
+      param="step"
       title="EU brief"
       block="Before european session"
       sub="Assemble the context before Europe trades — fundamentals, technicals, environment."
@@ -49,6 +51,7 @@ export default function Brief() {
           body: (
             <Hub
               bare
+              param="panel"
               title=""
               steps={[
                 { id: 'charts', label: 'Charts', body: <Charts /> },
@@ -65,8 +68,10 @@ export default function Brief() {
           body: (
             <Hub
               bare
+              param="panel"
               title=""
               steps={[
+                { id: 'regime', label: 'Regime & prior session', body: <RegimePanel /> },
                 { id: 'cal', label: 'Calendar', body: <Catalysts /> },
                 { id: 'flow', label: 'Flow calendar', body: <Flows /> },
                 { id: 'opt', label: 'Options & vol', body: <OptionsVol /> },

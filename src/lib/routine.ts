@@ -10,7 +10,7 @@
  * home screen asks this module for the single next action and shows that.
  */
 
-export type PhaseId = 'brief' | 'plan' | 'reassess' | 'live' | 'debrief';
+export type PhaseId = 'brief' | 'plan' | 'reassess' | 'debrief';
 
 export interface Phase {
   id: PhaseId;
@@ -59,18 +59,8 @@ export const PHASES: Phase[] = [
     action: 'Reassess for the US open',
     route: '/reassess',
     from: 13,
-    to: 14,
-    purpose: 'A five-minute reset: what changed, and does the plan still hold?',
-  },
-  {
-    id: 'live',
-    block: 'During trade',
-    label: 'Live',
-    action: 'Open the cockpit',
-    route: '/live',
-    from: 14,
     to: 21,
-    purpose: 'Levels, tape and the plan in front of me — capture what I see as I see it.',
+    purpose: 'A five-minute reset: what changed, and does the plan still hold?',
   },
   {
     id: 'debrief',
