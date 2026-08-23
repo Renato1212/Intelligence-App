@@ -2,6 +2,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CommandCenter } from '../components/CommandCenter';
+import { OptionsLevels } from '../components/OptionsLevels';
 import { useToast } from '../components/ui';
 import { loadDemoData } from '../lib/demo';
 import { db } from '../lib/db';
@@ -141,6 +142,8 @@ export default function Today() {
         ) : (
           <CommandCenter trades={trades} />
         )}
+
+        <OptionsLevels />
 
         <div className="card">
           <div className="card-title">
