@@ -1,14 +1,74 @@
 {
   "manifest_version": 3,
-  "name": "Edge Capture — Trader One",
-  "version": "2.0.0",
-  "description": "One click copies your visible Trader One trading data (orders/fills tables) as clean text, ready to paste into Edge Intelligence → Import.",
-  "permissions": ["activeTab", "scripting", "clipboardWrite"],
-  "host_permissions": ["https://trader.axiafutures.com/*"],
+  "name": "Edge Capture \u2014 Trader One + TT recorder",
+  "version": "2.1.0",
+  "description": "Copies visible Trader One trading data, and watches Trading Technologies positions so Edge Intelligence can auto-record your workspace around each trade.",
+  "permissions": [
+    "activeTab",
+    "clipboardWrite",
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1/*",
+    "http://localhost/*",
+    "https://*.trade.tt/*",
+    "https://*.tradingtechnologies.com/*",
+    "https://*.vercel.app/*",
+    "https://trader.axiafutures.com/*"
+  ],
   "action": {
     "default_title": "Edge Capture",
     "default_popup": "popup.html",
-    "default_icon": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" }
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   },
-  "icons": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" }
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.trade.tt/*",
+        "https://*.tradingtechnologies.com/*"
+      ],
+      "js": [
+        "tt-hook.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "https://*.trade.tt/*",
+        "https://*.tradingtechnologies.com/*"
+      ],
+      "js": [
+        "tt-relay.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "http://localhost/*",
+        "http://127.0.0.1/*",
+        "https://*.vercel.app/*"
+      ],
+      "js": [
+        "ei-bridge.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ]
 }

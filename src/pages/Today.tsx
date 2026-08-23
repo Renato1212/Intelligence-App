@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CommandCenter } from '../components/CommandCenter';
 import { OptionsLevels } from '../components/OptionsLevels';
+import { TradeRecorder } from '../components/TradeRecorder';
 import { useToast } from '../components/ui';
 import { loadDemoData } from '../lib/demo';
 import { db } from '../lib/db';
@@ -142,6 +143,8 @@ export default function Today() {
         ) : (
           <CommandCenter trades={trades} />
         )}
+
+        <TradeRecorder />
 
         <OptionsLevels />
 
