@@ -184,3 +184,29 @@ export interface TradeFilter {
   strategyId?: number;
   search?: string;
 }
+
+/**
+ * A screen recording captured automatically around one position: it starts
+ * when the position opens and stops when it is fully closed. Clips are heavy
+ * binary and stay LOCAL — they are deliberately excluded from cloud sync.
+ */
+export interface TradeClip {
+  id?: number;
+  /** trading day, YYYY-MM-DD */
+  date: string;
+  instrument: string;
+  side: Side;
+  /** the largest size held during the position */
+  qty: number;
+  /** human description: instrument, side, size, date, hour and session */
+  description: string;
+  startedAt: string;
+  endedAt: string;
+  durationMs: number;
+  mime: string;
+  sizeBytes: number;
+  blob: Blob;
+  /** filled in if the clip is later matched to an imported trade */
+  tradeId?: number | null;
+  source: 'auto' | 'manual';
+}

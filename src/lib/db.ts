@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie';
-import type { DailyDebrief, DayPrep, Photo, Strategy, Trade } from '../domain/types';
+import type { DailyDebrief, DayPrep, Photo, Strategy, Trade, TradeClip } from '../domain/types';
 
 /**
  * All data lives locally in the browser (IndexedDB) — nothing leaves
@@ -11,6 +11,7 @@ class EdgeDB extends Dexie {
   strategies!: Table<Strategy, number>;
   preps!: Table<DayPrep, number>;
   photos!: Table<Photo, number>;
+  clips!: Table<TradeClip, number>;
 
   constructor() {
     super('edge-intelligence');
@@ -33,6 +34,16 @@ class EdgeDB extends Dexie {
       strategies: '++id, uid, name, status',
       preps: '++id, uid, &date',
       photos: '++id, uid, [parentType+parentId]',
+    });
+    // v5: trade screen recordings. Local-only by design — video blobs are far
+    // too large for the sync payload, so `clips` is absent from cloud.ts TABLES.
+    this.version(5).stores({
+      trades: '++id, uid, date, instrument, domain, strategyId, entryTime, importKey',
+      debriefs: '++id, uid, &date',
+      strategies: '++id, uid, name, status',
+      preps: '++id, uid, &date',
+      photos: '++id, uid, [parentType+parentId]',
+      clips: '++id, date, instrument, startedAt, tradeId',
     });
     // v3: fixed overnight fields (dollarFx/gold/oil/euStocks/bunds) become a
     // per-day list of chosen markets
