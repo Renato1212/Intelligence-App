@@ -94,4 +94,49 @@
     a.click();
     URL.revokeObjectURL(a.href);
   });
+
+  /* ---------------- Trading Technologies position diagnostics ---------------
+   * Reports what the position watcher actually sees on the TT page, so a
+   * failure to detect positions can be pinpointed instead of guessed at.
+   */
+  var diagBtn = $('ttdiag');
+  if (diagBtn) {
+    diagBtn.addEventListener('click', function () {
+      chrome.storage.local.get('ei-tt-diag', function (res) {
+        var d = res && res['ei-tt-diag'];
+        var lines = [];
+        if (!d) {
+          lines.push('NO DIAGNOSTIC RECORDED.');
+          lines.push('The position watcher has not run on any Trading Technologies tab.');
+          lines.push('That means the extension is not active on your TT URL.');
+          lines.push('Open your TT tab, copy its address from the address bar, and send it over —');
+          lines.push('the extension only runs on trade.tt and tradingtechnologies.com today.');
+        } else {
+          lines.push('TT POSITION DIAGNOSTIC');
+          lines.push('url: ' + d.url);
+          lines.push('scanned at: ' + d.at);
+          lines.push('grids inspected: ' + (d.grids ? d.grids.length : 0));
+          lines.push('positions grid matched: ' + (d.matchedGrid ? ('YES — ' + d.matchedGrid.rows + ' position rows') : 'NO'));
+          lines.push('');
+          (d.grids || []).forEach(function (g, i) {
+            lines.push('--- grid ' + (i + 1) + ' ---');
+            lines.push('  header: ' + (g.header || '(none)'));
+            lines.push('  rows: ' + g.rows + ' | looksLikePositions: ' + g.looksLikePositions + ' | parsedPositionRows: ' + g.positionRows);
+            (g.sample || []).forEach(function (s2) { lines.push('  sample: ' + s2); });
+          });
+        }
+        var text = lines.join('\n');
+        out.value = text;
+        try {
+          navigator.clipboard.writeText(text);
+          status.className = '';
+          status.textContent = 'Diagnostic copied — paste it back to Claude.';
+        } catch (e) {
+          status.className = 'err';
+          status.textContent = 'Copy failed — select the text above manually.';
+        }
+      });
+    });
+  }
+
 })();

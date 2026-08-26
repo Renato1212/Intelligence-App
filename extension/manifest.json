@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
   "name": "Edge Capture \u2014 Trader One + TT recorder",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Copies visible Trader One trading data, and watches Trading Technologies positions so Edge Intelligence can auto-record your workspace around each trade.",
   "permissions": [
     "activeTab",
     "clipboardWrite",
     "scripting",
+    "storage",
     "tabs"
   ],
   "host_permissions": [
@@ -53,7 +54,8 @@
         "https://*.tradingtechnologies.com/*"
       ],
       "js": [
-        "tt-relay.js"
+        "tt-relay.js",
+        "tt-positions.js"
       ],
       "run_at": "document_start",
       "all_frames": true
