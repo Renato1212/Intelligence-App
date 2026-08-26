@@ -42,8 +42,13 @@ interface RecorderLike {
   onstop: (() => void) | null;
   state: string;
 }
+interface TrackLike {
+  stop(): void;
+  readyState?: string;
+  addEventListener?: (type: string, fn: () => void) => void;
+}
 interface StreamLike {
-  getTracks(): { stop(): void }[];
+  getTracks(): TrackLike[];
 }
 
 export interface RecorderDeps {
@@ -51,6 +56,12 @@ export interface RecorderDeps {
   makeRecorder: (stream: StreamLike, mime: string) => RecorderLike;
   /** deliver a finished clip (download / save) */
   onClip: (blob: Blob, name: string) => void;
+  /**
+   * The shared stream died — usually because the trader pressed the browser's
+   * own "Stop sharing" button. Without this the panel would keep claiming to be
+   * armed while capturing nothing, which is the worst possible failure mode.
+   */
+  onStreamEnded?: () => void;
 }
 
 /**
@@ -74,6 +85,21 @@ export class TradeRecorder {
     }
     try {
       this.stream = await this.deps.getDisplayMedia({ video: { frameRate: 30 }, audio: false });
+      // Chrome's "Stop sharing" bar ends the track behind our back.
+      try {
+        for (const t of this.stream.getTracks()) {
+          t.addEventListener?.('ended', () => {
+            if (!this.stream) return;
+            this.stopClip();
+            this.stream = null;
+            this.recorder = null;
+            this.state = 'off';
+            this.deps.onStreamEnded?.();
+          });
+        }
+      } catch {
+        // addEventListener is optional on the injected test double
+      }
       this.state = 'armed';
       return null;
     } catch (e) {
@@ -95,6 +121,17 @@ export class TradeRecorder {
 
   isArmed(): boolean {
     return this.state === 'armed' || this.state === 'recording';
+  }
+
+  /** True when a capture track is present and still live. */
+  hasLiveTrack(): boolean {
+    if (!this.stream) return false;
+    try {
+      const tracks = this.stream.getTracks();
+      return tracks.length > 0 && tracks.some((t) => t.readyState == null || t.readyState === 'live');
+    } catch {
+      return false;
+    }
   }
 
   /** Begin a clip for a trade. No-op (returns false) if not armed or already recording. */
@@ -143,8 +180,12 @@ export function downloadBlob(blob: Blob, name: string): void {
 }
 
 /** Construct a recorder wired to the real browser APIs. */
-export function browserRecorder(onClip: (blob: Blob, name: string) => void = downloadBlob): TradeRecorder {
+export function browserRecorder(
+  onClip: (blob: Blob, name: string) => void = downloadBlob,
+  onStreamEnded?: () => void,
+): TradeRecorder {
   return new TradeRecorder({
+    onStreamEnded,
     getDisplayMedia: (c) => (navigator.mediaDevices as unknown as { getDisplayMedia: (x: unknown) => Promise<StreamLike> }).getDisplayMedia(c),
     makeRecorder: (stream, mime) => new MediaRecorder(stream as unknown as MediaStream, mime ? { mimeType: mime } : undefined) as unknown as RecorderLike,
     onClip,
