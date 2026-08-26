@@ -1,8 +1,8 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useToast } from './ui';
 import type { TradeClip } from '../domain/types';
-import { ClipRecorder, listenForPlatform, type RecorderState } from '../lib/clipRecorder';
+import { getClipRecorder, listenForPlatform, selfTest, type CheckResult, type RecorderState } from '../lib/clipRecorder';
 import { db } from '../lib/db';
 import { formatDuration } from '../lib/positionTracker';
 
@@ -66,14 +66,17 @@ function ClipRow({ c, onPlay }: { c: TradeClip; onPlay: (c: TradeClip) => void }
 
 export function TradeRecorder() {
   const toast = useToast();
-  const recRef = useRef<ClipRecorder | null>(null);
-  if (!recRef.current) recRef.current = new ClipRecorder(() => toast('Recording saved to the platform'));
-  const rec = recRef.current;
+  // Module singleton, NOT per component: arming holds a screen-capture stream,
+  // and a per-instance recorder would be discarded when this screen unmounts,
+  // orphaning the capture and coming back reporting "off".
+  const rec = getClipRecorder(() => toast('Recording saved to the platform'));
 
   const [state, setState] = useState<RecorderState>(rec.getState());
   const [playing, setPlaying] = useState<TradeClip | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [manualInst, setManualInst] = useState('ES');
+  const [checks, setChecks] = useState<CheckResult[] | null>(null);
+  const [checking, setChecking] = useState(false);
 
   useEffect(() => rec.subscribe(setState), [rec]);
   useEffect(() => listenForPlatform(rec), [rec]);
@@ -150,6 +153,37 @@ export function TradeRecorder() {
         <div className="row" style={{ marginBottom: 6 }}>
           <button className="btn sm" onClick={() => rec.stopManual()}>■ Stop &amp; save now</button>
           <span className="muted small">only needed if the platform feed missed the close</span>
+        </div>
+      )}
+
+      <div className="row" style={{ gap: 8, marginTop: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+        <button
+          className="btn sm"
+          disabled={checking}
+          onClick={async () => {
+            setChecking(true);
+            setChecks(await selfTest(rec));
+            setChecking(false);
+          }}
+        >
+          {checking ? 'Checking…' : 'Why is it not recording?'}
+        </button>
+        <span className="muted small">runs a self-test on every link in the chain</span>
+      </div>
+
+      {checks && (
+        <div style={{ background: 'var(--surface)', borderRadius: 8, padding: '10px 12px', marginTop: 8 }}>
+          {checks.map((c) => (
+            <div key={c.label} className="row" style={{ gap: 8, alignItems: 'flex-start', padding: '3px 0', flexWrap: 'nowrap' }}>
+              <span style={{ color: c.ok ? 'var(--profit)' : 'var(--loss)', width: 14, flexShrink: 0, fontWeight: 700 }}>{c.ok ? '✓' : '✗'}</span>
+              <span className="small" style={{ width: 150, flexShrink: 0, fontWeight: 600 }}>{c.label}</span>
+              <span className="muted small" style={{ flex: 1, minWidth: 0, lineHeight: 1.5 }}>{c.detail}</span>
+            </div>
+          ))}
+          <div className="muted small" style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--hairline)' }}>
+            When arming, pick <b>Entire screen</b> or the <b>Trading Technologies window</b> — if you share “this tab”
+            you will record Edge Intelligence instead of your charts.
+          </div>
         </div>
       )}
 
